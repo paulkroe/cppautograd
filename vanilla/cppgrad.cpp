@@ -10,7 +10,6 @@ void Tensor::backward() {
     if (!requires_grad) {
         throw std::runtime_error("This tensor does not require gradient");
     }
-    std::cout << "Backward function called" << std::endl;
     // Initialize gradient if necessary
     if (!grad) {
         grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 1.0f), shape, false);
@@ -338,4 +337,151 @@ Tensor Tensor::matmul(const Tensor &other) const{
 
     }
     return result;
+}
+
+Tensor Tensor::sum(size_t dim) const {
+    // Check for valid dimension
+    if (dim >= shape.size()) {
+        throw std::invalid_argument("Invalid dimension for sum operation");
+    }
+
+    // Calculate new shape after reduction along `dim`
+    std::vector<size_t> new_shape = shape;
+    new_shape.erase(new_shape.begin() + dim); // Remove the dimension being reduced
+
+    // Allocate memory for the result
+    size_t result_size = this->numel(new_shape);
+    std::vector<float> result_data(result_size, 0.0f);
+
+    // Perform summation along the specified dimension
+    size_t stride = 1;
+    for (size_t i = dim + 1; i < shape.size(); ++i) {
+        stride *= shape[i];
+    }
+
+    for (size_t i = 0; i < result_size; ++i) {
+        for (size_t j = 0; j < shape[dim]; ++j) {
+            result_data[i] += data[i + j * stride];
+        }
+    }
+
+    // Create the reduced tensor
+    Tensor result(result_data, new_shape, requires_grad);
+
+    if (result.requires_grad) {
+        auto this_requires_grad = this->requires_grad;
+        auto this_grad = this->grad;
+        auto this_shape = this->shape;
+        auto result_grad = result.grad;
+        auto result_shape = result.shape;
+        auto this_backward_fn = this->backward_fn;
+
+        result.backward_fn = [this_requires_grad, this_grad, this_shape, 
+                            result_grad, result_shape, this_backward_fn, dim]() {
+            if (this_requires_grad && this_grad) {
+                // Broadcast the result gradient back to the original shape
+                std::vector<float> grad_data(this_grad->data.size(), 0.0f);
+
+                size_t stride = 1;
+                for (size_t i = dim + 1; i < this_shape.size(); ++i) {
+                    stride *= this_shape[i];
+                }
+
+                for (size_t i = 0; i < result_grad->data.size(); ++i) {
+                    for (size_t j = 0; j < this_shape[dim]; ++j) {
+                        grad_data[i + j * stride] = result_grad->data[i];
+                    }
+                }
+
+                // Add the broadcasted gradient to the existing gradient
+                for (size_t i = 0; i < grad_data.size(); ++i) {
+                    this_grad->data[i] += grad_data[i];
+                }
+            }
+            
+            if (this_backward_fn) this_backward_fn();
+
+        };
+    }
+
+    return result;
+}
+
+Tensor Tensor::sum() const {
+    return sum(shape.size() - 1);
+}
+
+Tensor Tensor::mean(size_t dim) const {
+    // Check for valid dimension
+    if (dim >= shape.size()) {
+        throw std::invalid_argument("Invalid dimension for sum operation");
+    }
+
+    // Calculate new shape after reduction along `dim`
+    std::vector<size_t> new_shape = shape;
+    new_shape.erase(new_shape.begin() + dim); // Remove the dimension being reduced
+
+    // Allocate memory for the result
+    size_t result_size = this->numel(new_shape);
+    std::vector<float> result_data(result_size, 0.0f);
+
+    // Perform summation along the specified dimension
+    size_t stride = 1;
+    for (size_t i = dim + 1; i < shape.size(); ++i) {
+        stride *= shape[i];
+    }
+
+    for (size_t i = 0; i < result_size; ++i) {
+        for (size_t j = 0; j < shape[dim]; ++j) {
+            result_data[i] += data[i + j * stride];
+        }
+    }
+
+    for (size_t i = 0; i < result_size; ++i) {
+        result_data[i] /= shape[dim];
+    }
+
+    // Create the reduced tensor
+    Tensor result(result_data, new_shape, requires_grad);
+
+    if (result.requires_grad) {
+        auto this_requires_grad = this->requires_grad;
+        auto this_grad = this->grad;
+        auto this_shape = this->shape;
+        auto result_grad = result.grad;
+        auto result_shape = result.shape;
+        auto this_backward_fn = this->backward_fn;
+
+        result.backward_fn = [this_requires_grad, this_grad, this_shape, 
+                            result_grad, result_shape, this_backward_fn, dim]() {
+            if (this_requires_grad && this_grad) {
+                // Broadcast the result gradient back to the original shape
+                std::vector<float> grad_data(this_grad->data.size(), 0.0f);
+
+                size_t stride = 1;
+                for (size_t i = dim + 1; i < this_shape.size(); ++i) {
+                    stride *= this_shape[i];
+                }
+
+                for (size_t i = 0; i < result_grad->data.size(); ++i) {
+                    for (size_t j = 0; j < this_shape[dim]; ++j) {
+                        grad_data[i + j * stride] = result_grad->data[i];
+                    }
+                }
+
+                // Add the broadcasted gradient to the existing gradient
+                for (size_t i = 0; i < grad_data.size(); ++i) {
+                    this_grad->data[i] += grad_data[i] / this_shape[dim];
+                }
+            }
+
+            if (this_backward_fn) this_backward_fn();
+        };
+    }
+
+    return result;
+}
+
+Tensor Tensor::mean() const {
+    return mean(shape.size() - 1);
 }

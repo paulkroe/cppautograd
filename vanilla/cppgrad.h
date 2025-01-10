@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <iostream>
 
 class Tensor {
 public:
@@ -45,6 +46,38 @@ public:
         }
     }
 
+    // Overload the << operator
+    friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor) {
+        os << "Data: ";
+        for (float d : tensor.data) {
+            os << d << " ";
+        }
+        os << "\n";
+
+        os << "Shape: ";
+        for (size_t s : tensor.shape) {
+            os << s << " ";
+        }
+        os << "\n";
+
+        if (tensor.requires_grad && tensor.grad) {
+            os << "Gradient: ";
+            for (float g : tensor.grad->data) {
+                os << g << " ";
+            }
+            os << "\n";
+        }
+
+        return os;
+    }
+
+    /* print shape */
+    void print_shape() {
+        for (size_t s : shape) {
+            std::cout << s << " ";
+        }
+        std::cout << std::endl;
+    }
 
     void backward();
 
@@ -58,6 +91,14 @@ public:
     Tensor operator*(const Tensor& other) const;
     /* matrix multiplication */
     Tensor matmul(const Tensor &other) const;
+    /* sum over dimension */
+    Tensor sum(size_t dim) const;
+    Tensor sum() const;
+    /* mean over dimension */
+    Tensor mean(size_t dim) const;
+    Tensor mean() const;
+
+
 
 private:
     static size_t numel(const std::vector<size_t>& shp) {

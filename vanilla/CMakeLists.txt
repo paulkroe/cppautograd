@@ -7,9 +7,12 @@ project(CPPGradEngine)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(Torch_DIR "/path/to/libtorch/share/cmake/Torch")
+# Set CUDA location explicitly (if needed)
+set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
+
 # Find LibTorch
 find_package(Torch REQUIRED)
+
 
 # Add the library
 add_library(cppgrad STATIC cppgrad.cpp)
@@ -19,7 +22,7 @@ add_executable(main main.cpp)
 target_link_libraries(main PRIVATE cppgrad)
 
 # Add the test executable for backward.cpp
-add_executable(backward_test ../tests/backward.cpp)
+add_executable(backward_test ../../tests/backward.cpp)
 target_link_libraries(backward_test PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(backward_test PRIVATE ${TORCH_INCLUDE_DIRS})
 

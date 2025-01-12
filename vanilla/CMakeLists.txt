@@ -13,9 +13,17 @@ set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
 # Find LibTorch
 find_package(Torch REQUIRED)
 
-
 # Add the library
 add_library(cppgrad STATIC cppgrad.cpp)
+
+# Enable warnings for cppgrad
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(cppgrad PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# Link Torch libraries to cppgrad
+target_link_libraries(cppgrad PRIVATE "${TORCH_LIBRARIES}")
+target_include_directories(cppgrad PRIVATE ${TORCH_INCLUDE_DIRS})
 
 # Add the main executable
 add_executable(main main.cpp)
@@ -26,10 +34,10 @@ add_executable(backward_test ../../tests/backward.cpp)
 target_link_libraries(backward_test PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(backward_test PRIVATE ${TORCH_INCLUDE_DIRS})
 
-# Enable warnings for cppgrad
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(cppgrad PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# Add the test executable for linear.cpp
+add_executable(linear_test ../../tests/linear.cpp)
+target_link_libraries(linear_test PRIVATE cppgrad "${TORCH_LIBRARIES}")
+target_include_directories(linear_test PRIVATE ${TORCH_INCLUDE_DIRS})
 
 # Set flags for LibTorch (optional)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")

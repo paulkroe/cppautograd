@@ -1,2 +1,0 @@
-/usr/bin/ar qc libcppgrad.a CMakeFiles/cppgrad.dir/cppgrad.cpp.o
-/usr/bin/ranlib libcppgrad.a

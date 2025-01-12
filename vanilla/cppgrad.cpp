@@ -1,84 +1,261 @@
 #include "cppgrad.h"
 #include <iostream>
 
+/* 
+ * backward function for scalar tensors:
+ * 1. Check if the tensor is scalar
+ * 2. Check if the tensor requires gradient
+ * 3. Initialize/Set the gradient to 1.0
+ * 4. Call the backward function if tensor has a backward function
+ */
 void Tensor::backward() {
-
+    /* Check if the tensor is a scalar */
     if (this->numel(shape) != 1) {
         throw std::runtime_error("Backward only supported for scalar outputs");
     }
 
+    /* Check if the tensor requires gradient */
     if (!requires_grad) {
         throw std::runtime_error("This tensor does not require gradient");
     }
-    // Initialize gradient if necessary
+    /* Initialize gradient if necessary */
     if (!grad) {
         grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 1.0f), shape, false);
     } else {
-        // Ensure the gradient is explicitly set to 1.0 for the target
+        /* Ensure the gradient is explicitly set to 1.0 for the target */
         std::fill(grad->data.begin(), grad->data.end(), 1.0f);
     }
 
+    /* Call the backward function of the target tensor */
     if (backward_fn) {
         backward_fn();
     }
 }
 
-/* Overloaded + operator */
-Tensor Tensor::operator+(const Tensor& other) const{
-    std::cout << "Addition operator called" << std::endl;
-    if (!shapes_equal(this->shape, other.shape)) {
-        throw std::invalid_argument("Tensor shapes must match for addition.");
-    }
+/* 
+ * Helper function to infer broadcast shape 
+ * To shapes are broadcastable 
+ * When iterating over the dimension sizes, starting at the trailing dimension,
+ * the dimension sizes must either be equal, one of them is 1, or one of them does not exist
+ */
+std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2) {
+    size_t max_dims = std::max(shape1.size(), shape2.size());
+    std::vector<size_t> result(max_dims, 1);
 
-    // Perform addition
-    std::vector<float> result_data(data.size());
-    for (size_t i = 0; i < data.size(); i++) {
-        result_data[i] = data[i] + other.data[i];
-    }
+    for (size_t i = 0; i < max_dims; ++i) {
+        size_t dim1 = i < shape1.size() ? shape1[shape1.size() - 1 - i] : 1;
+        size_t dim2 = i < shape2.size() ? shape2[shape2.size() - 1 - i] : 1;
 
-    Tensor result(result_data, shape, requires_grad || other.requires_grad);
+        if (dim1 != dim2 && dim1 != 1 && dim2 != 1) {
+            return {};
+        }
 
-    if (result.requires_grad) {
-        auto sz = data.size();
-
-        auto this_requires_grad = this->requires_grad;
-        auto other_requires_grad = other.requires_grad;
-
-        auto this_grad = this->grad;
-        auto other_grad = other.grad;
-        auto this_backward_fn = this->backward_fn;
-        auto other_backward_fn = other.backward_fn;
-
-        // Capture the result gradients
-        auto result_grad = result.grad;
-
-        result.backward_fn = [sz, 
-                              this_requires_grad, other_requires_grad,
-                              this_grad, other_grad,
-                              this_backward_fn, other_backward_fn,
-                              result_grad]() {
-            // Update this grad
-            if (this_requires_grad && this_grad) {
-                for (size_t i = 0; i < sz; i++) {
-                    this_grad->data[i] += result_grad->data[i];
-                }
-                if (this_backward_fn) this_backward_fn();
-            }
-
-            // Update other grad
-            if (other_requires_grad && other_grad) {
-                for (size_t i = 0; i < sz; i++) {
-                    other_grad->data[i] += result_grad->data[i];
-                }
-                if (other_backward_fn) other_backward_fn();
-            }
-        };
+        result[max_dims - 1 - i] = std::max(dim1, dim2);
     }
 
     return result;
 }
 
-// Unary minus operator
+/*
+ * Helper function to print tensor shape
+ */
+void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2) {
+    std::cout << "this->shape ";
+    for (auto s : shape1) {
+        std::cout << s << " ";
+    }
+    std::cout << " vs. other.shape ";
+    for (auto s : shape2) {
+        std::cout << s << " ";
+    }
+    std::cout << std::endl;
+}
+
+/* 
+ * Overloaded + operator, does not support broadcasting
+ * 1. Check if the shapes of the tensors match or the tensors are broadcastable
+ * 2. Perform elementwise addition
+ * 3. Construct the result tensor
+ * 4. If necessary, set up the backward function
+ */
+Tensor Tensor::operator+(const Tensor& other) const{
+    /* Check if shapes match */
+    if (shapes_equal(this->shape, other.shape)) {
+        /* Perform addition */
+        std::vector<float> result_data(data.size());
+        for (size_t i = 0; i < data.size(); i++) {
+            result_data[i] = data[i] + other.data[i];
+        }
+
+        /* Construct result tensor */
+        Tensor result(result_data, shape, requires_grad || other.requires_grad);
+
+        /* Construct backward function */
+        if (result.requires_grad) {
+            /* 
+            * Capture references to required tensor data and metadata
+            * (e.g., grad pointers, backward functions) to ensure they remain
+            * accessible during the backward pass, even after the forward
+            * computation has completed.
+            */
+            auto sz = data.size();
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto result_grad = result.grad;
+
+            result.backward_fn = [sz, 
+                                this_requires_grad, other_requires_grad,
+                                this_grad, other_grad,
+                                this_backward_fn, other_backward_fn,
+                                result_grad]() {
+                
+                /* 
+                * If this tensor requires its gradient and
+                * the gradient vector exists, update its gradient 
+                */
+                if (this_requires_grad && this_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        this_grad->data[i] += result_grad->data[i];
+                    }
+                    /* Call the previous backward function if it exists */
+                    if (this_backward_fn) this_backward_fn();
+                }
+
+                /* 
+                * If the other tensor requires its gradient and
+                * the gradient vector exists, update its gradient 
+                */
+                if (other_requires_grad && other_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        other_grad->data[i] += result_grad->data[i];
+                    }
+                    /* Call the previous backward function if it exists */
+                    if (other_backward_fn) other_backward_fn();
+                }
+            };
+        }
+
+        return result;       
+    }
+    else {
+        std::vector<size_t> result_shape;
+        result_shape = broadcast(this->shape, other.shape);
+        
+        if (result_shape.empty()) {
+            printShapes(this->shape, other.shape);
+            throw std::invalid_argument("Tensor shapes must be broadcastable for addition.");
+        }
+               
+        /* Perform addition with broadcasting */
+        size_t result_size = numel(result_shape);
+        std::vector<float> result_data(result_size);
+
+        for (size_t i = 0; i < result_size; ++i) {
+            // Compute the multi-dimensional index in the result shape
+            std::vector<size_t> multi_index(result_shape.size(), 0);
+            size_t temp = i;
+            for (int j = result_shape.size() - 1; j >= 0; --j) {
+                multi_index[j] = temp % result_shape[j];
+                temp /= result_shape[j];
+            }
+
+            // Map to indices in the original tensors
+            size_t index_a = map_index(multi_index, this->shape);
+            size_t index_b = map_index(multi_index, other.shape);
+
+            // Perform the addition
+            result_data[i] = this->data[index_a] + other.data[index_b];
+        }
+
+        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+
+        if (result.requires_grad) {
+
+            auto sz = data.size();
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto result_grad = result.grad;
+
+            result.backward_fn = [sz,
+                                this_requires_grad, other_requires_grad,
+                                this_grad, other_grad,
+                                this_backward_fn, other_backward_fn,
+                                result_grad, this_shape = this->shape, other_shape = other.shape,
+                                result_shape = result.shape]() {
+
+                // Lambda to compute the reduction for broadcasting
+                auto reduce_broadcasted_grad = [](const std::vector<float>& grad_data,
+                                                const std::vector<size_t>& grad_shape,
+                                                const std::vector<size_t>& original_shape) -> std::vector<float> {
+                    std::vector<float> reduced_grad(original_shape.size(), 0);
+
+                    // Iterate over the gradient data and sum along broadcasted dimensions
+                    for (size_t i = 0; i < grad_data.size(); ++i) {
+                        std::vector<size_t> multi_index(grad_shape.size(), 0);
+                        size_t temp = i;
+
+                        // Compute the multi-dimensional index of the result gradient
+                        for (int j = grad_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % grad_shape[j];
+                            temp /= grad_shape[j];
+                        }
+
+                        // Reduce to the original tensor dimensions
+                        size_t original_index = 0;
+                        size_t stride = 1;
+                        for (int j = original_shape.size() - 1; j >= 0; --j) {
+                            size_t dim_index = (j < multi_index.size() ? multi_index[j] : 0) % original_shape[j];
+                            original_index += dim_index * stride;
+                            stride *= original_shape[j];
+                        }
+                        reduced_grad[original_index] += grad_data[i];
+                    }
+
+                    return reduced_grad;
+                };
+
+                // Backpropagate gradient for the first tensor
+                if (this_requires_grad && this_grad) {
+                    auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, this_shape);
+                    for (size_t i = 0; i < reduced_grad.size(); ++i) {
+                        this_grad->data[i] += reduced_grad[i];
+                    }
+                    if (this_backward_fn) this_backward_fn();
+                }
+
+                // Backpropagate gradient for the second tensor
+                if (other_requires_grad && other_grad) {
+                    auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, other_shape);
+                    for (size_t i = 0; i < reduced_grad.size(); ++i) {
+                        other_grad->data[i] += reduced_grad[i];
+                    }
+                    if (other_backward_fn) other_backward_fn();
+                }
+            };
+
+        }
+
+        return result;
+    }
+
+
+}
+
+/* 
+ * Overloaded unary - operator
+ * 1. Negate the data
+ * 2. Negate the gradient if necessary
+ * 3. Construct the result tensor
+ * 4. If necessary, set up the backward function
+ */
 Tensor Tensor::operator-() const {
     /* Negate data */
     std::vector<float> negated_data(data.size());
@@ -97,24 +274,35 @@ Tensor Tensor::operator-() const {
         negated_grad->shape = grad->shape;
     }
 
-    // Create the negated Tensor
+    /* Construct result tensor */
     Tensor result(negated_data, shape, requires_grad, negated_grad);
 
-    // Set up the backward function for the unary minus operator
+    /* Construct backward function */
     if (result.requires_grad) {
-        auto sz = data.size();            // Size of the tensor
+         /* 
+         * Capture references to required tensor data and metadata
+         * (e.g., grad pointers, backward functions) to ensure they remain
+         * accessible during the backward pass, even after the forward
+         * computation has completed.
+         */
+        auto sz = data.size();
         auto this_requires_grad = this->requires_grad;
         auto this_grad = this->grad;
         auto this_backward_fn = this->backward_fn;
-        auto result_grad = result.grad;  // Result's gradient
+        auto result_grad = result.grad;
 
-        result.backward_fn = [sz, this_requires_grad, this_grad, this_backward_fn, result_grad]() {
+        result.backward_fn = [sz,
+                              this_requires_grad, this_grad,
+                              this_backward_fn, result_grad]() {
             if (this_requires_grad && this_grad) {
-                // Propagate the negated gradient
+               /*
+                * If this tensor requires its gradient and
+                * the gradient vector exists, update its gradient 
+                */
                 for (size_t i = 0; i < sz; i++) {
                     this_grad->data[i] -= result_grad->data[i];
                 }
-                // Call the previous backward function if it exists
+                /* Call the previous backward function if it exists */
                 if (this_backward_fn) this_backward_fn();
             }
         };
@@ -123,42 +311,50 @@ Tensor Tensor::operator-() const {
     return result;
 }
 
-/* binary minus operator */
+/* 
+ * Overloaded binary - operator
+ * using unary - and + operators
+ * 1. Check if shapes match
+ * 2. this - other = this + (-other)
+ */
 Tensor Tensor::operator-(const Tensor& other) const{
     /* check if shapes match */
     if (!shapes_equal(this->shape, other.shape)) {
         throw std::invalid_argument("Tensor shapes must match for subtraction.");
     }
-
+    /* a - b =  a + (-b) */
     return *this + (-other);
 }
 
-/* Overloaded * operator */
+/* 
+ * Overloaded binary * operator 
+ * 1. Check if shapes match
+ * 2. Perform elementwise multiplication
+ */
 Tensor Tensor::operator*(const Tensor& other) const{
-    std::cout << "Multiplication operator called" << std::endl;
+    /* Check if shapes match */
     if (!shapes_equal(this->shape, other.shape)) {
         throw std::invalid_argument("Tensor shapes must match for multiplication.");
     }
 
-    // Perform multiplication
+    /* Perform elementwise multiplication */
     std::vector<float> result_data(data.size());
     for (size_t i = 0; i < data.size(); i++) {
         result_data[i] = data[i] * other.data[i];
     }
 
+    /* Construct result tensor */
     Tensor result(result_data, shape, requires_grad || other.requires_grad);
-
+    
+    /* Construct backward function */
     if (result.requires_grad) {
         auto sz = data.size();
-
         auto this_requires_grad = this->requires_grad;
         auto other_requires_grad = other.requires_grad;
-
         auto this_grad = this->grad;
         auto other_grad = other.grad;
         auto this_backward_fn = this->backward_fn;
         auto other_backward_fn = other.backward_fn;
-
         auto this_data = this->data;
         auto other_data = other.data;
         auto result_grad = result.grad;
@@ -168,17 +364,26 @@ Tensor Tensor::operator*(const Tensor& other) const{
                               this_grad, other_grad,
                               this_backward_fn, other_backward_fn,
                               this_data, other_data, result_grad]() {
+           /*
+            * If this tensor requires its gradient and
+            * the gradient vector exists, update its gradient 
+            */
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < sz; i++) {
                     this_grad->data[i] += other_data[i] * result_grad->data[i];
                 }
+                /* Call the previous backward function if it exists */
                 if (this_backward_fn) this_backward_fn();
             }
-
+            /*
+             * If other tensor requires its gradient and
+             * the gradient vector exists, update its gradient 
+             */
             if (other_requires_grad && other_grad) {
                 for (size_t i = 0; i < sz; i++) {
                     other_grad->data[i] += this_data[i] * result_grad->data[i];
                 }
+                /* Call the previous backward function if it exists */
                 if (other_backward_fn) other_backward_fn();
             }
         };
@@ -188,14 +393,14 @@ Tensor Tensor::operator*(const Tensor& other) const{
 }
 
 /*
-    Matrix multiplication of two tensors, without broadcasting.
-    We assume 
-    A has shape [b1, b2, ..., bN, m, n]
-    B has shape [b1, b2, ..., bN, x, p]
-    such that n == x
-    thus:
-    C = A.matul(B) has shape [b1, b2, ..., bN, m, p]
-*/
+ * Matrix multiplication of two tensors, without broadcasting.
+ * We assume 
+ * A has shape [b1, b2, ..., bN, m, n]
+ * B has shape [b1, b2, ..., bN, x, p]
+ * such that n == x
+ * thus:
+ * C = A.matul(B) has shape [b1, b2, ..., bN, m, p]
+ */
 Tensor Tensor::matmul(const Tensor &other) const{
 
     /* check matrix dimensions */

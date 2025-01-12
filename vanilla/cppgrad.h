@@ -155,6 +155,21 @@ private:
         }
         return true;
     }
+
+    static size_t map_index(const std::vector<size_t>& index, const std::vector<size_t>& shape) {
+        size_t flat_index = 0;
+        size_t stride = 1;
+
+        for (int i = shape.size() - 1; i >= 0; --i) {
+            size_t temp = i;
+            size_t dim_index = (temp < index.size() ? index[temp] : 0);
+            flat_index += (dim_index % shape[temp]) * stride;
+            stride *= shape[temp];
+        }
+
+        return flat_index;
+    }
+
 };
 
 #endif // CPPGRAD_H

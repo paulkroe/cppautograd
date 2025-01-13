@@ -326,6 +326,7 @@ Tensor Tensor::operator-(const Tensor& other) const{
     return *this + (-other);
 }
 
+/* TODO: implement support for broadcasting */
 /* 
  * Overloaded binary * operator 
  * 1. Check if shapes match
@@ -392,217 +393,275 @@ Tensor Tensor::operator*(const Tensor& other) const{
     return result;
 }
 
-/*
- * Matrix multiplication of two tensors, without broadcasting.
- * We assume 
- * A has shape [b1, b2, ..., bN, m, n]
- * B has shape [b1, b2, ..., bN, x, p]
- * such that n == x
- * thus:
- * C = A.matul(B) has shape [b1, b2, ..., bN, m, p]
- */
-Tensor Tensor::matmul(const Tensor &other) const{
+std::vector<size_t> Tensor::unflatten_index(size_t flat_index, const std::vector<size_t>& shape) {
+    std::vector<size_t> multi_index(shape.size(), 0);
+    size_t temp = flat_index;
 
-    /* check matrix dimensions */
-
-    /* num_dim >= 2 for both matrices*/
-    if (shape.size() < 2 || other.shape.size() < 2)
-        throw std::invalid_argument("Both matrices must have at least 2 columns");
-
-    size_t m = shape[shape.size() - 2];
-    size_t n = shape[shape.size() - 1];
-
-    size_t x = other.shape[other.shape.size() - 2];
-    size_t p = other.shape[other.shape.size() - 1];
-
-    if (n != x)
-        throw std::invalid_argument("Matricies must have matching inner dimensions");
-    
-    /* check if matrices have the same number of dimensions */
-    if (shape.size() != other.shape.size())
-        throw std::invalid_argument("Matrices must have the same number of columns, no broadcasting");
-
-    /* check if leading dimensions match */
-    std::vector<size_t> batch_shape;
-    for (size_t i = 0; i < shape.size() - 2; i++) {
-        if (shape[i] != other.shape[i]) {
-            throw std::invalid_argument("Batch dimensions must match for bmm (no broadcasting).");
-        }
-        batch_shape.push_back(shape[i]);
+    for (int i = shape.size() - 1; i >= 0; --i) {
+        multi_index[i] = temp % shape[i];
+        temp /= shape[i];
     }
 
-    std::vector<size_t> result_shape = batch_shape;
-    result_shape.push_back(m);
-    result_shape.push_back(p);
+    return multi_index;
+}
 
-    /* comupte the number of elements */
-    size_t total_elems = this->numel(result_shape);
-    
-    std::vector<float> result_data(total_elems, 0.0f);
+std::vector<float> Tensor::reduce_grad(const std::vector<float>& grad, 
+                               const std::vector<size_t>& grad_shape, 
+                               const std::vector<size_t>& original_shape) {
+    std::vector<float> reduced_grad(Tensor::numel(original_shape), 0.0f);
 
-    /* forward pass */
-    /* triple-nested loop: over each batch, over each i, j, k */
+    for (size_t i = 0; i < grad.size(); ++i) {
+        std::vector<size_t> multi_index = Tensor::unflatten_index(i, grad_shape);
+        size_t reduced_index = Tensor::map_index(multi_index, original_shape);
+        reduced_grad[reduced_index] += grad[i];
+    }
 
-    for (size_t b = 0; b < total_elems/(m*p); b++) {
-        // offset in A = b * (m*n)
-        // offset in B = b * (n*p)
-        // offset in C = b * (m*p)
-        size_t A_offset = b * (m * n);
-        size_t B_offset = b * (n * p);
-        size_t C_offset = b * (m * p);
+    return reduced_grad;
+}
 
+/*
+ * Matrix multiplication of two tensors, with broadcasting.
+ * We assume 
+ * A has shape [..., m, n]
+ * B has shape [..., x, p]
+ * such that n == x
+ * thus:
+ * C = A.matul(B) has shape [..., m, p]
+ */
+Tensor Tensor::matmul(const Tensor &other) const {
+    // 1. Validate that both have at least 2 dims
+    if (shape.size() < 2 || other.shape.size() < 2) {
+        throw std::invalid_argument("Both tensors must have at least 2 dimensions for matmul.");
+    }
+
+    // 2. If both are strictly 2D, do a simpler 2D matmul (no broadcasting)
+    if (shape.size() == 2 && other.shape.size() == 2) {
+        // 2D matrix multiply: A in [m, n], B in [n, p]
+        size_t m = shape[0];
+        size_t n = shape[1];
+        size_t x = other.shape[0];
+        size_t p = other.shape[1];
+
+        if (n != x) {
+            throw std::invalid_argument("Inner dimensions do not match for 2D matmul.");
+        }
+
+        // Construct output shape [m, p]
+        std::vector<size_t> result_shape = {m, p};
+        std::vector<float> result_data(m * p, 0.0f);
+
+        // Forward pass: standard triple-nested loop
         for (size_t i = 0; i < m; i++) {
             for (size_t j = 0; j < p; j++) {
                 float sum = 0.0f;
                 for (size_t k = 0; k < n; k++) {
-                    sum += data[A_offset + i*n + k] *
-                           other.data[B_offset + k*p + j];
+                    sum += data[i*n + k] * other.data[k*p + j];
                 }
-                result_data[C_offset + i*p + j] = sum;
+                result_data[i*p + j] = sum;
             }
         }
-    }
 
-    /* Construct the output tensor */
-    bool out_requires_grad = (requires_grad || other.requires_grad);
-    Tensor result(result_data, result_shape, out_requires_grad);
+        // Create output tensor
+        bool out_requires_grad = (requires_grad || other.requires_grad);
+        Tensor result(result_data, result_shape, out_requires_grad);
 
-    /* Setup the backward_fn if needed */
-    if (out_requires_grad) {
-        auto this_requires_grad = this->requires_grad;
-        auto other_requires_grad = other.requires_grad;
+        // Backward pass
+        if (out_requires_grad) {
+            auto A_grad = this->grad;
+            auto B_grad = other.grad;
+            auto result_grad = result.grad;
 
-        auto this_grad = this->grad;
-        auto other_grad = other.grad;
-        auto result_grad = result.grad;
+            auto A_data = data;
+            auto B_data = other.data;
 
-        auto A_data = data;
-        auto B_data = other.data;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
 
-        auto this_shape = shape;
-        auto other_shape = other.shape;
-        auto res_shape = result_shape;
-
-        auto this_backward_fn = this->backward_fn;
-        auto other_backward_fn = other.backward_fn;
-
-        result.backward_fn = [=]() mutable {
-            //
-            // We assume:
-            //   A has shape: this_shape = [batch..., m, n]
-            //   B has shape: other_shape = [batch..., n, p]
-            //   C has shape: result_shape = [batch..., m, p]
-            //
-            // We want: dA = dC * B^T
-            //
-            if (this_requires_grad && this_grad) {
-
-                // 1. Compute how many batch “slices” we have.
-                //    For example, if this_shape = [2, 3, 4, 5], then the last two
-                //    dims (4, 5) are (m, n), so the “batch shape” is [2, 3].
-                //    The total number of slices = 2 * 3 = 6.
-                size_t batch_count = 1;
-                for (size_t i = 0; i + 2 < this_shape.size(); i++) {
-                    batch_count *= this_shape[i];
-                }
-
-                // 2. Extract (m, n) from the last two dimensions
-                const size_t m = this_shape[this_shape.size() - 2];
-                const size_t n = this_shape[this_shape.size() - 1];
-
-                // 3. p comes from the last dimension of B
-                //    (assuming B also has the same batch_count in front,
-                //     then shape is [..., n, p]).
-                const size_t p = other_shape[other_shape.size() - 1];
-
-                // -------------------------------------------------------
-                // NOTE: We do NOT zero out this_grad here.
-                // If you need your gradients to start at zero each backward pass,
-                // do it outside (e.g. a higher-level 'zero_grad()' call).
-                // -------------------------------------------------------
-
-                // 4. Loop over each batch slice
-                for (size_t b = 0; b < batch_count; b++) {
-                    // Offsets for each slice in the flattened data
-                    const size_t offsetA = b * (m * n);
-                    const size_t offsetB = b * (n * p);
-                    const size_t offsetC = b * (m * p);
-
-                    // 4a. Accumulate gradient w.r.t. A in the b-th slice
-                    //     dA[i, k] += sum_{j} of [ dC[i, j] * B[k, j] ]
+            result.backward_fn = [=]() mutable {
+                // dA = dC * B^T
+                if (requires_grad && A_grad) {
                     for (size_t i = 0; i < m; i++) {
                         for (size_t k = 0; k < n; k++) {
-                            float grad_value = 0.0f;
+                            float grad_val = 0.0f;
                             for (size_t j = 0; j < p; j++) {
-                                grad_value += result_grad->data[offsetC + i*p + j]
-                                            * B_data[offsetB + k*p + j];
+                                grad_val += result_grad->data[i*p + j] * B_data[k*p + j];
                             }
-                            this_grad->data[offsetA + i*n + k] += grad_value;
+                            A_grad->data[i*n + k] += grad_val;
                         }
                     }
+                    // Chain back
+                    if (this_backward_fn) this_backward_fn();
                 }
 
-                // 5. Call the previous backward if it exists (chaining backprop)
-                if (this_backward_fn) {
-                    this_backward_fn();
-                }
-            }
-
-            if (other_requires_grad && other_grad) {
-
-                // 1) Compute how many batch slices we have
-                //    For example, if this_shape = [2, 3, 4, 5], then the last two dims 
-                //    (4, 5) are (m, n), so the batch shape is [2, 3].
-                //    The total number of slices = 2 * 3 = 6.
-                size_t batch_count = 1;
-                for (size_t i = 0; i + 2 < other_shape.size(); i++) {
-                    batch_count *= other_shape[i];
-                }
-
-                // 2) Extract (n, p) from the last two dimensions of B
-                //    In a typical matmul scenario:
-                //      B has shape [..., n, p]
-                const size_t n = other_shape[other_shape.size() - 2];
-                const size_t p = other_shape[other_shape.size() - 1];
-
-                // 3) For the same reason, A has shape [..., m, n],
-                //    so we read m, n from A as well:
-                const size_t m = this_shape[this_shape.size() - 2];
-                // (We could re-check that the "n" dimension matches, etc.)
-
-                // 4) Loop over each batch slice
-                for (size_t b = 0; b < batch_count; b++) {
-                    // Compute offsets in flattened data for A, B, C
-                    // (assuming A, B, and C are fully batched with batch_count slices)
-                    const size_t offsetA = b * (m * n);
-                    const size_t offsetB = b * (n * p);
-                    const size_t offsetC = b * (m * p);
-
-                    // 4a) Accumulate gradient w.r.t. B in the b-th slice
-                    //     dB[k, j] += sum_{i} [ A[i, k] * dC[i, j] ]
+                // dB = A^T * dC
+                if (other.requires_grad && B_grad) {
                     for (size_t k = 0; k < n; k++) {
                         for (size_t j = 0; j < p; j++) {
-                            float grad_value = 0.0f;
+                            float grad_val = 0.0f;
                             for (size_t i = 0; i < m; i++) {
-                                grad_value += A_data[offsetA + i*n + k]
-                                            * result_grad->data[offsetC + i*p + j];
+                                grad_val += A_data[i*n + k] * result_grad->data[i*p + j];
                             }
-                            other_grad->data[offsetB + k*p + j] += grad_value;
+                            B_grad->data[k*p + j] += grad_val;
                         }
                     }
+                    // Chain back
+                    if (other_backward_fn) other_backward_fn();
                 }
+            };
+        }
 
-                // 5) Call the previous backward if it exists (chaining backprop)
-                if (other_backward_fn) {
-                    other_backward_fn();
+        return result;
+    }
+    else {
+        // 3. Otherwise, fall back to your **existing** batched + broadcasting logic:
+        //    (the code you already wrote)
+        // ---------------------------------------------------------
+        //  (BEGIN) Your existing code with batch broadcast ...
+        // ---------------------------------------------------------
+
+        size_t m = shape[shape.size() - 2];
+        size_t n = shape[shape.size() - 1];
+        size_t x = other.shape[other.shape.size() - 2];
+        size_t p = other.shape[other.shape.size() - 1];
+
+        if (n != x) {
+            throw std::invalid_argument("Inner dimensions of the tensors must match for matmul.");
+        }
+
+        // (A) Determine batch shape
+        std::vector<size_t> this_batch_shape;
+        std::vector<size_t> other_batch_shape;
+        std::vector<size_t> batch_shape;
+
+        if (shape.size() > 2 || other.shape.size() > 2) {
+            this_batch_shape = std::vector<size_t>(shape.begin(), shape.begin() + (shape.size() - 2));
+            other_batch_shape = std::vector<size_t>(other.shape.begin(), other.shape.begin() + (other.shape.size() - 2));
+
+            batch_shape = broadcast(this_batch_shape, other_batch_shape);
+            if (batch_shape.empty()) {
+                this->print_shape();
+                other.print_shape();
+                throw std::invalid_argument("Tensors not broadcastable for matmul.");
+            }
+        }
+        // else: no batch dims, batch_shape remains empty => batch_size = 1
+
+        // (B) Construct result shape
+        auto result_shape = batch_shape;
+        result_shape.push_back(m);
+        result_shape.push_back(p);
+
+        // (C) Forward pass
+        size_t batch_size = 1;
+        for (auto d : batch_shape) batch_size *= d;
+
+        size_t total_elems = batch_size * m * p;
+        std::vector<float> result_data(total_elems, 0.0f);
+
+        for (size_t b = 0; b < batch_size; ++b) {
+            std::vector<size_t> batch_index = Tensor::unflatten_index(b, batch_shape);
+            size_t A_offset = map_index(batch_index, this_batch_shape) * m * n;
+            size_t B_offset = map_index(batch_index, other_batch_shape) * n * p;
+            size_t C_offset = b * (m * p);
+
+            for (size_t i = 0; i < m; i++) {
+                for (size_t j = 0; j < p; j++) {
+                    float sum = 0.0f;
+                    for (size_t k = 0; k < n; k++) {
+                        sum += data[A_offset + i*n + k] * other.data[B_offset + k*p + j];
+                    }
+                    result_data[C_offset + i*p + j] = sum;
                 }
             }
+        }
 
+        // (D) Build result
+        bool out_requires_grad = (requires_grad || other.requires_grad);
+        Tensor result(result_data, result_shape, out_requires_grad);
 
-        };
+        // (E) Backward pass
+        if (out_requires_grad) {
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto result_grad = result.grad;
 
+            auto A_data = data;
+            auto B_data = other.data;
+
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+
+            auto saved_this_shape = shape;      
+            auto saved_other_shape = other.shape; 
+            auto saved_batch_shape = batch_shape;
+
+            result.backward_fn = [=]() mutable {
+                size_t batch_size = 1;
+                for (auto d : saved_batch_shape) batch_size *= d;
+
+                // dA = dC * B^T
+                if (requires_grad && this_grad) {
+                    for (size_t b = 0; b < batch_size; b++) {
+                        std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
+                        size_t A_offset = map_index(batch_index,
+                                                    std::vector<size_t>(saved_this_shape.begin(),
+                                                                        saved_this_shape.end() - 2))
+                                          * (m * n);
+                        size_t B_offset = map_index(batch_index,
+                                                    std::vector<size_t>(saved_other_shape.begin(),
+                                                                        saved_other_shape.end() - 2))
+                                          * (n * p);
+                        size_t C_offset = b * (m * p);
+
+                        for (size_t i = 0; i < m; i++) {
+                            for (size_t k = 0; k < n; k++) {
+                                float grad_value = 0.0f;
+                                for (size_t j = 0; j < p; j++) {
+                                    grad_value += result_grad->data[C_offset + i*p + j]
+                                                * B_data[B_offset + k*p + j];
+                                }
+                                this_grad->data[A_offset + i*n + k] += grad_value;
+                            }
+                        }
+                    }
+                    this_grad->data = reduce_grad(this_grad->data, saved_this_shape, shape);
+                    if (this_backward_fn) this_backward_fn();
+                }
+
+                // dB = A^T * dC
+                if (other.requires_grad && other_grad) {
+                    for (size_t b = 0; b < batch_size; b++) {
+                        std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
+                        size_t A_offset = map_index(batch_index,
+                                                    std::vector<size_t>(saved_this_shape.begin(),
+                                                                        saved_this_shape.end() - 2))
+                                          * (m * n);
+                        size_t B_offset = map_index(batch_index,
+                                                    std::vector<size_t>(saved_other_shape.begin(),
+                                                                        saved_other_shape.end() - 2))
+                                          * (n * p);
+                        size_t C_offset = b * (m * p);
+
+                        for (size_t k = 0; k < n; k++) {
+                            for (size_t j = 0; j < p; j++) {
+                                float grad_value = 0.0f;
+                                for (size_t i = 0; i < m; i++) {
+                                    grad_value += A_data[A_offset + i*n + k]
+                                                * result_grad->data[C_offset + i*p + j];
+                                }
+                                other_grad->data[B_offset + k*p + j] += grad_value;
+                            }
+                        }
+                    }
+                    other_grad->data = reduce_grad(other_grad->data, saved_other_shape, other.shape);
+                    if (other_backward_fn) other_backward_fn();
+                }
+            };
+        }
+
+        // Return the final result
+        return result;
     }
-    return result;
 }
 
 Tensor Tensor::sum(size_t dim) const {

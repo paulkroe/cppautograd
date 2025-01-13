@@ -72,7 +72,7 @@ public:
     }
 
     /* print shape */
-    void print_shape() {
+    void print_shape() const{
         for (size_t s : shape) {
             std::cout << s << " ";
         }
@@ -147,7 +147,7 @@ private:
         }
         return product;
     }
-
+    
     static bool shapes_equal(const std::vector<size_t>& a, const std::vector<size_t>& b) {
         if (a.size() != b.size()) return false;
         for (size_t i = 0; i < a.size(); i++) {
@@ -169,6 +169,14 @@ private:
 
         return flat_index;
     }
+
+    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
+
+    static std::vector<float> reduce_grad(const std::vector<float>& grad, 
+        const std::vector<size_t>& grad_shape, 
+        const std::vector<size_t>& original_shape);
+
+
 
 };
 

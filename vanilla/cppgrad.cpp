@@ -193,34 +193,40 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
                 // Lambda to compute the reduction for broadcasting
                 auto reduce_broadcasted_grad = [](const std::vector<float>& grad_data,
-                                                const std::vector<size_t>& grad_shape,
-                                                const std::vector<size_t>& original_shape) -> std::vector<float> {
-                    std::vector<float> reduced_grad(original_shape.size(), 0);
+                                  const std::vector<size_t>& grad_shape,
+                                  const std::vector<size_t>& original_shape) -> std::vector<float>{
+                    // Number of elements, not just dimension count
+                    size_t original_numel = numel(original_shape);
 
-                    // Iterate over the gradient data and sum along broadcasted dimensions
+                    // Allocate the full size
+                    std::vector<float> reduced_grad(original_numel, 0.0f);
+
+                    // Accumulate
                     for (size_t i = 0; i < grad_data.size(); ++i) {
-                        std::vector<size_t> multi_index(grad_shape.size(), 0);
+                        std::vector<size_t> multi_index(grad_shape.size());
                         size_t temp = i;
 
-                        // Compute the multi-dimensional index of the result gradient
+                        // Convert the linear index `i` into a multi-dimensional index,
+                        // by repeatedly dividing by each dimension size from right to left.
                         for (int j = grad_shape.size() - 1; j >= 0; --j) {
                             multi_index[j] = temp % grad_shape[j];
                             temp /= grad_shape[j];
                         }
 
-                        // Reduce to the original tensor dimensions
-                        size_t original_index = 0;
-                        size_t stride = 1;
+                        // Convert multi_index to linear index in original_shape
+                        size_t original_index = 0, stride = 1;
                         for (int j = original_shape.size() - 1; j >= 0; --j) {
-                            size_t dim_index = (j < multi_index.size() ? multi_index[j] : 0) % original_shape[j];
+                            size_t dim_index = multi_index[j] % original_shape[j];
                             original_index += dim_index * stride;
                             stride *= original_shape[j];
                         }
+
                         reduced_grad[original_index] += grad_data[i];
                     }
 
                     return reduced_grad;
                 };
+
 
                 // Backpropagate gradient for the first tensor
                 if (this_requires_grad && this_grad) {
@@ -245,7 +251,6 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
         return result;
     }
-
 
 }
 
@@ -513,11 +518,6 @@ Tensor Tensor::matmul(const Tensor &other) const {
         return result;
     }
     else {
-        // 3. Otherwise, fall back to your **existing** batched + broadcasting logic:
-        //    (the code you already wrote)
-        // ---------------------------------------------------------
-        //  (BEGIN) Your existing code with batch broadcast ...
-        // ---------------------------------------------------------
 
         size_t m = shape[shape.size() - 2];
         size_t n = shape[shape.size() - 1];
@@ -581,6 +581,8 @@ Tensor Tensor::matmul(const Tensor &other) const {
 
         // (E) Backward pass
         if (out_requires_grad) {
+            auto this_requires_grad = requires_grad;
+            auto other_requires_grad = other.requires_grad;
             auto this_grad = this->grad;
             auto other_grad = other.grad;
             auto result_grad = result.grad;
@@ -599,8 +601,9 @@ Tensor Tensor::matmul(const Tensor &other) const {
                 size_t batch_size = 1;
                 for (auto d : saved_batch_shape) batch_size *= d;
 
+            
                 // dA = dC * B^T
-                if (requires_grad && this_grad) {
+                if (this_requires_grad && this_grad) {
                     for (size_t b = 0; b < batch_size; b++) {
                         std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
                         size_t A_offset = map_index(batch_index,
@@ -624,12 +627,13 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             }
                         }
                     }
-                    this_grad->data = reduce_grad(this_grad->data, saved_this_shape, shape);
+                    this_grad->data = reduce_grad(this_grad->data, saved_this_shape, saved_this_shape);
+                
                     if (this_backward_fn) this_backward_fn();
                 }
 
                 // dB = A^T * dC
-                if (other.requires_grad && other_grad) {
+                if (other_requires_grad && other_grad) {
                     for (size_t b = 0; b < batch_size; b++) {
                         std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
                         size_t A_offset = map_index(batch_index,
@@ -653,12 +657,12 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             }
                         }
                     }
-                    other_grad->data = reduce_grad(other_grad->data, saved_other_shape, other.shape);
+                    other_grad->data = reduce_grad(other_grad->data, saved_other_shape, saved_other_shape);
                     if (other_backward_fn) other_backward_fn();
                 }
             };
         }
-
+        
         // Return the final result
         return result;
     }

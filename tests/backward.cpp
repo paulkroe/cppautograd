@@ -224,30 +224,76 @@ void test_multidimensional() {
 
 // Function to test batched operations
 void test_batched_operations() {
-    std::cout << "Test 1: Batched Matrix Multiplication\n";
+    {
+        std::cout << "Test 1: Batched Matrix Multiplication\n";
 
-    // Define batch matrices for cppgrad
-    Tensor a_cpp({1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
-    Tensor b_cpp({13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
+        // Define batch matrices for cppgrad
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
+        Tensor b_cpp({13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
 
-    Tensor c_cpp = a_cpp.matmul(b_cpp); // Shape: (2, 2, 2)
-    Tensor c_cpp_sum = c_cpp.sum().sum().sum(); // Reduce to scalar for backward
-    c_cpp_sum.backward();
+        Tensor c_cpp = a_cpp.matmul(b_cpp); // Shape: (2, 2, 2)
+        Tensor c_cpp_sum = c_cpp.sum().sum().sum(); // Reduce to scalar for backward
+        c_cpp_sum.backward();
 
-    // Define batch matrices for PyTorch
-    auto a_torch = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}},
-                                   {{5.0, 6.0}, {7.0, 8.0}}}, torch::requires_grad()); // Shape: (2, 2, 3)
-    auto b_torch = torch::tensor({{{13.0, 14.0}, {15.0, 16.0}},
-                                   {{17.0, 18.0}, {19.0, 20.0}}}, torch::requires_grad()); // Shape: (2, 3, 2)
+        // Define batch matrices for PyTorch
+        auto a_torch = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}},
+                                    {{5.0, 6.0}, {7.0, 8.0}}}, torch::requires_grad()); // Shape: (2, 2, 3)
+        auto b_torch = torch::tensor({{{13.0, 14.0}, {15.0, 16.0}},
+                                    {{17.0, 18.0}, {19.0, 20.0}}}, torch::requires_grad()); // Shape: (2, 3, 2)
 
-    auto c_torch = torch::bmm(a_torch, b_torch); // Shape: (2, 2, 2)
-    auto c_torch_sum = c_torch.sum().sum().sum(); // Reduce to scalar for backward
-    c_torch_sum.backward();
+        auto c_torch = torch::bmm(a_torch, b_torch); // Shape: (2, 2, 2)
+        auto c_torch_sum = c_torch.sum().sum().sum(); // Reduce to scalar for backward
+        c_torch_sum.backward();
 
-    // Compare results
-    compare_tensors(c_cpp.data, c_torch, "Batched Matrix Multiplication Result");
-    compare_tensors(a_cpp.grad->data, a_torch.grad(), "Batched Matrix Multiplication Gradient (a)");
-    compare_tensors(b_cpp.grad->data, b_torch.grad(), "Batched Matrix Multiplication Gradient (b)");
+        // Compare results
+        compare_tensors(c_cpp.data, c_torch, "Batched Matrix Multiplication Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Batched Matrix Multiplication Gradient (a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Batched Matrix Multiplication Gradient (b)");
+    }    std::cout << "Test 1: Batched Matrix Multiplication\n";
+
+        // Define batch matrices for cppgrad
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
+        Tensor b_cpp({13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0}, {2, 2, 2}, true); // Shape: (2, 2, 2)
+
+        Tensor c_cpp = a_cpp.matmul(b_cpp); // Shape: (2, 2, 2)
+        Tensor c_cpp_sum = c_cpp.sum().sum().sum(); // Reduce to scalar for backward
+        c_cpp_sum.backward();
+
+        // Define batch matrices for PyTorch
+        auto a_torch = torch::tensor({{{1.0, 2.0}, {3.0, 4.0}},
+                                    {{5.0, 6.0}, {7.0, 8.0}}}, torch::requires_grad()); // Shape: (2, 2, 3)
+        auto b_torch = torch::tensor({{{13.0, 14.0}, {15.0, 16.0}},
+                                    {{17.0, 18.0}, {19.0, 20.0}}}, torch::requires_grad()); // Shape: (2, 3, 2)
+
+        auto c_torch = torch::bmm(a_torch, b_torch); // Shape: (2, 2, 2)
+        auto c_torch_sum = c_torch.sum().sum().sum(); // Reduce to scalar for backward
+        c_torch_sum.backward();
+
+        // Compare results
+        compare_tensors(c_cpp.data, c_torch, "Batched Matrix Multiplication Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Batched Matrix Multiplication Gradient (a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Batched Matrix Multiplication Gradient (b)");
+    {
+        std::cout << "Test 2: Batched Addition\n";
+        // Shape (2, 2, 1)
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {2, 2, 1}, true);
+        // Shape (2)
+        Tensor b_cpp({5.0, 6.0}, {2}, true);
+
+        Tensor c_cpp = (a_cpp + b_cpp).sum().sum().sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({{{1.0}, {2.0}}, {{3.0}, {4.0}}}, torch::requires_grad());
+        auto b_torch = torch::tensor({5.0, 6.0}, torch::requires_grad());
+
+        auto c_torch = (a_torch + b_torch).sum().sum();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Batched Addition Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Batched Addition Gradient (a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Batched Addition Gradient (b)");
+
+    }
 }
 
 

@@ -18,10 +18,10 @@ int main () {
     float lr = 0.01;
 
     for (int i = 0; i < 10000; i++) {
-        Tensor x = Tensor::randn({1, 5}, false);
+        Tensor x = Tensor::randn({5, 1, 5}, false);
         /* forward pass */
         Tensor y = linear2.forward(linear1.forward(x));
-        Tensor loss = (y * y).sum();
+        Tensor loss = (y * y).sum().sum().sum();
 
         if (i%500 ==0) {
             std::cout << "Epoch " << i << std::endl;

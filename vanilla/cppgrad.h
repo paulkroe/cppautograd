@@ -107,6 +107,7 @@ public:
     /* elementwise multiplication operator */
     Tensor operator*(const Tensor& other) const;
     /* elementwise division operator */
+    Tensor operator/(const Tensor& other) const;
     /* matrix multiplication */
     Tensor matmul(const Tensor &other) const;
     /* sum over dimension */
@@ -121,9 +122,6 @@ public:
     Tensor softmax(size_t dim) const;
     /* softmax */
     Tensor softmax() const;
-
-
-
 
 private:
     // unravel_index: given a linear index `idx` and a shape vector, produce

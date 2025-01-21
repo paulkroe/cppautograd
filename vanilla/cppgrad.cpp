@@ -551,6 +551,206 @@ Tensor Tensor::operator*(const Tensor& other) const {
     }
 }
 
+Tensor Tensor::operator/(const Tensor& other) const {
+    // 1. If shapes match exactly, do the simple elementwise division.
+    if (shapes_equal(this->shape, other.shape)) {
+        
+        std::vector<float> result_data(data.size());
+        for (size_t i = 0; i < data.size(); i++) {
+            result_data[i] = data[i] / other.data[i];  // Division
+        }
+
+        Tensor result(result_data, shape, requires_grad || other.requires_grad);
+
+        // Build backward function if needed...
+        if (result.requires_grad) {
+            auto sz = data.size();
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto this_data = this->data;
+            auto other_data = other.data;
+            auto result_grad = result.grad;
+
+            result.backward_fn = [sz,
+                                  this_requires_grad, other_requires_grad,
+                                  this_grad, other_grad,
+                                  this_backward_fn, other_backward_fn,
+                                  this_data, other_data, result_grad]() {
+                if (this_requires_grad && this_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        this_grad->data[i] += result_grad->data[i] / other_data[i];  // ∂L/∂a = 1/b
+                    }
+                    if (this_backward_fn) this_backward_fn();
+                }
+                if (other_requires_grad && other_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        other_grad->data[i] -= (this_data[i] * result_grad->data[i]) / (other_data[i] * other_data[i]);  // ∂L/∂b = -a / b^2
+                    }
+                    if (other_backward_fn) other_backward_fn();
+                }
+            };
+        }
+        return result;
+    }
+    else {
+        std::vector<size_t> result_shape;
+        result_shape = broadcast(this->shape, other.shape);
+        
+        if (result_shape.empty()) {
+            printShapes(this->shape, other.shape);
+            throw std::invalid_argument("Tensor shapes must be broadcastable for division.");
+        }
+               
+        /* Perform division with broadcasting */
+        size_t result_size = numel(result_shape);
+        std::vector<float> result_data(result_size);
+
+        for (size_t i = 0; i < result_size; ++i) {
+            // Compute the multi-dimensional index in the result shape
+            std::vector<size_t> multi_index(result_shape.size(), 0);
+            size_t temp = i;
+            for (int j = result_shape.size() - 1; j >= 0; --j) {
+                multi_index[j] = temp % result_shape[j];
+                temp /= result_shape[j];
+            }
+
+            // Map to indices in the original tensors
+            size_t index_a = map_index(multi_index, this->shape);
+            size_t index_b = map_index(multi_index, other.shape);
+
+            // Perform the division
+            result_data[i] = this->data[index_a] / other.data[index_b];
+        }
+
+        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+
+        if (result.requires_grad) {
+
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto result_grad = result.grad;
+
+            result.backward_fn = [this_requires_grad, other_requires_grad,
+                      this_grad, other_grad,
+                      this_backward_fn, other_backward_fn,
+                      result_grad, 
+                      this_data = this->data,   // capture forward data
+                      other_data = other.data,
+                      this_shape = this->shape,
+                      other_shape = other.shape,
+                      result_shape = result.shape]() 
+            {
+                // Lambda to reduce the gradient via summation after division
+                auto reduce_broadcasted_grad = [](
+                    const std::vector<float>& grad_data,
+                    const std::vector<size_t>& grad_shape,
+                    const std::vector<size_t>& original_shape
+                ) -> std::vector<float>
+                {
+                    size_t original_numel = numel(original_shape);
+                    std::vector<float> reduced_grad(original_numel, 0.0f);
+
+                    int offset = grad_shape.size() - original_shape.size(); // Align dimensions
+
+                    for (size_t i = 0; i < grad_data.size(); ++i) {
+                        // Convert linear index `i` into `multi_index` in `grad_shape`
+                        std::vector<size_t> multi_index(grad_shape.size(), 0);
+                        size_t temp = i;
+                        for (int j = grad_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % grad_shape[j];
+                            temp /= grad_shape[j];
+                        }
+
+                        // Map `multi_index` to `original_shape`
+                        size_t original_index = 0;
+                        size_t stride = 1;
+                        for (int j = original_shape.size() - 1; j >= 0; --j) {
+                            int grad_index_pos = j + offset; // Correct for alignment
+
+                            // If grad_shape has more leading dimensions, ignore them
+                            size_t dim_index = (grad_index_pos >= 0) ? multi_index[grad_index_pos] : 0;
+
+                            // If original_shape[j] == 1, it was broadcasted → force index 0
+                            if (original_shape[j] == 1) dim_index = 0;
+
+                            original_index += dim_index * stride;
+                            stride *= original_shape[j];
+                        }
+
+                        // Accumulate the gradient correctly (sum over broadcasted axes)
+                        reduced_grad[original_index] += grad_data[i];
+                    }
+
+                    return reduced_grad;
+                };
+
+
+                // 1) Gradient w.r.t. x (this->data)
+                if (this_requires_grad && this_grad)
+                {
+                    std::vector<float> partial_grad_x(result_grad->data.size(), 0.0f);
+
+                    for (size_t i = 0; i < result_grad->data.size(); ++i) {
+                        std::vector<size_t> multi_index(result_shape.size());
+                        size_t temp = i;
+                        for (int j = result_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % result_shape[j];
+                            temp /= result_shape[j];
+                        }
+
+                        size_t index_b = map_index(multi_index, other_shape);
+                        partial_grad_x[i] = result_grad->data[i] / other_data[index_b]; // ∂L/∂a = 1/b
+                    }
+
+                    auto reduced_grad_x = reduce_broadcasted_grad(partial_grad_x, result_shape, this_shape);
+                    
+                    for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
+                        this_grad->data[i] += reduced_grad_x[i];  // Accumulate correctly
+                    }
+
+                    if (this_backward_fn) {
+                        this_backward_fn();
+                    }
+                } 
+
+                // 2) Gradient w.r.t. y (other->data)
+                if (other_requires_grad && other_grad)
+                {
+                    std::vector<float> partial_grad_y(result_grad->data.size(), 0.0f);
+
+                    for (size_t i = 0; i < result_grad->data.size(); i++) {
+                        std::vector<size_t> multi_index(result_shape.size());
+                        size_t temp = i;
+                        for (int j = result_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % result_shape[j];
+                            temp /= result_shape[j];
+                        }
+
+                        size_t index_a = map_index(multi_index, this_shape);
+                        size_t index_b = map_index(multi_index, other_shape);
+                        partial_grad_y[i] = -result_grad->data[i] * this_data[index_a] / (other_data[index_b] * other_data[index_b]); // ∂L/∂b
+                    }
+
+                    auto reduced_grad_y = reduce_broadcasted_grad(partial_grad_y, result_shape, other_shape);
+                    
+                    for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
+                        other_grad->data[i] += reduced_grad_y[i];  // Ensure correct accumulation
+                    }
+                }
+            };
+        }
+        return result;
+    }
+}
+
 std::vector<size_t> Tensor::unflatten_index(size_t flat_index, const std::vector<size_t>& shape) {
     std::vector<size_t> multi_index(shape.size(), 0);
     size_t temp = flat_index;
@@ -1223,7 +1423,7 @@ Tensor Tensor::softmax(size_t dim) const {
     Tensor exp_tensor = this->exp(); 
     Tensor sum_exp = exp_tensor.sum(dim); 
 
-    return exp_tensor * sum_exp;
+    return exp_tensor / sum_exp;
 }
 
 Tensor Tensor::softmax() const {

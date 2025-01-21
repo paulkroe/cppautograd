@@ -106,6 +106,7 @@ public:
     Tensor operator-() const;
     /* elementwise multiplication operator */
     Tensor operator*(const Tensor& other) const;
+    /* elementwise division operator */
     /* matrix multiplication */
     Tensor matmul(const Tensor &other) const;
     /* sum over dimension */
@@ -114,6 +115,13 @@ public:
     /* mean over dimension */
     Tensor mean(size_t dim) const;
     Tensor mean() const;
+    /* exp tensor */
+    Tensor exp() const;
+    /* softmax over dimension */
+    Tensor softmax(size_t dim) const;
+    /* softmax */
+    Tensor softmax() const;
+
 
 
 
@@ -156,27 +164,39 @@ private:
         return true;
     }
 
-    static size_t map_index(const std::vector<size_t>& index, const std::vector<size_t>& shape) {
-        size_t flat_index = 0;
+    static size_t map_index(const std::vector<size_t>& multi_index,
+                        const std::vector<size_t>& shape)
+    {
+        size_t linear_index = 0;
         size_t stride = 1;
 
+        // Align dimensions: shape may be smaller than multi_index.
+        int offset = multi_index.size() - shape.size();
+
+        // Iterate over shape dimensions from right to left
         for (int i = shape.size() - 1; i >= 0; --i) {
-            size_t temp = i;
-            size_t dim_index = (temp < index.size() ? index[temp] : 0);
-            flat_index += (dim_index % shape[temp]) * stride;
-            stride *= shape[temp];
+            int multi_idx_pos = i + offset; // Adjust for dimension alignment
+
+            size_t broadcast_dim_index = multi_index[multi_idx_pos];  // Corresponding index in result shape
+            size_t dim_size = shape[i];  // Size of dimension in original tensor
+
+            // If broadcasting occurs along this dimension, always use index 0
+            size_t index_component = (dim_size == 1) ? 0 : broadcast_dim_index;
+
+            // Accumulate to compute the linear index
+            linear_index += index_component * stride;
+            stride *= dim_size;
         }
 
-        return flat_index;
+        return linear_index;
     }
 
-    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
 
-    static std::vector<float> reduce_grad(const std::vector<float>& grad, 
-        const std::vector<size_t>& grad_shape, 
-        const std::vector<size_t>& original_shape);
+static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
 
-
+static std::vector<float> reduce_grad(const std::vector<float>& grad, 
+    const std::vector<size_t>& grad_shape, 
+    const std::vector<size_t>& original_shape);
 
 };
 

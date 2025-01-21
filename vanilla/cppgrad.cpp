@@ -1,5 +1,6 @@
 #include "cppgrad.h"
 #include <iostream>
+#include <cmath>
 
 /* 
  * backward function for scalar tensors:
@@ -72,7 +73,7 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
 }
 
 /* 
- * Overloaded + operator, does not support broadcasting
+ * Overloaded + operator, does support broadcasting
  * 1. Check if the shapes of the tensors match or the tensors are broadcastable
  * 2. Perform elementwise addition
  * 3. Construct the result tensor
@@ -192,40 +193,49 @@ Tensor Tensor::operator+(const Tensor& other) const{
                                 result_shape = result.shape]() {
 
                 // Lambda to compute the reduction for broadcasting
-                auto reduce_broadcasted_grad = [](const std::vector<float>& grad_data,
-                                  const std::vector<size_t>& grad_shape,
-                                  const std::vector<size_t>& original_shape) -> std::vector<float>{
-                    // Number of elements, not just dimension count
+                auto reduce_broadcasted_grad = [](
+                    const std::vector<float>& grad_data,
+                    const std::vector<size_t>& grad_shape,
+                    const std::vector<size_t>& original_shape
+                ) -> std::vector<float>
+                {
                     size_t original_numel = numel(original_shape);
-
-                    // Allocate the full size
                     std::vector<float> reduced_grad(original_numel, 0.0f);
 
-                    // Accumulate
-                    for (size_t i = 0; i < grad_data.size(); ++i) {
-                        std::vector<size_t> multi_index(grad_shape.size());
-                        size_t temp = i;
+                    int offset = grad_shape.size() - original_shape.size(); // Align dimensions
 
-                        // Convert the linear index `i` into a multi-dimensional index,
-                        // by repeatedly dividing by each dimension size from right to left.
+                    for (size_t i = 0; i < grad_data.size(); ++i) {
+                        // Convert linear index `i` into `multi_index` in `grad_shape`
+                        std::vector<size_t> multi_index(grad_shape.size(), 0);
+                        size_t temp = i;
                         for (int j = grad_shape.size() - 1; j >= 0; --j) {
                             multi_index[j] = temp % grad_shape[j];
                             temp /= grad_shape[j];
                         }
 
-                        // Convert multi_index to linear index in original_shape
-                        size_t original_index = 0, stride = 1;
+                        // Map `multi_index` to `original_shape`
+                        size_t original_index = 0;
+                        size_t stride = 1;
                         for (int j = original_shape.size() - 1; j >= 0; --j) {
-                            size_t dim_index = multi_index[j] % original_shape[j];
+                            int grad_index_pos = j + offset; // Correct for alignment
+
+                            // If grad_shape has more leading dimensions, ignore them
+                            size_t dim_index = (grad_index_pos >= 0) ? multi_index[grad_index_pos] : 0;
+
+                            // If original_shape[j] == 1, it was broadcasted → force index 0
+                            if (original_shape[j] == 1) dim_index = 0;
+
                             original_index += dim_index * stride;
                             stride *= original_shape[j];
                         }
 
+                        // Accumulate the gradient correctly (sum over broadcasted axes)
                         reduced_grad[original_index] += grad_data[i];
                     }
 
                     return reduced_grad;
                 };
+
 
 
                 // Backpropagate gradient for the first tensor
@@ -323,10 +333,6 @@ Tensor Tensor::operator-() const {
  * 2. this - other = this + (-other)
  */
 Tensor Tensor::operator-(const Tensor& other) const{
-    /* check if shapes match */
-    if (!shapes_equal(this->shape, other.shape)) {
-        throw std::invalid_argument("Tensor shapes must match for subtraction.");
-    }
     /* a - b =  a + (-b) */
     return *this + (-other);
 }
@@ -337,65 +343,212 @@ Tensor Tensor::operator-(const Tensor& other) const{
  * 1. Check if shapes match
  * 2. Perform elementwise multiplication
  */
-Tensor Tensor::operator*(const Tensor& other) const{
-    /* Check if shapes match */
-    if (!shapes_equal(this->shape, other.shape)) {
-        throw std::invalid_argument("Tensor shapes must match for multiplication.");
-    }
+Tensor Tensor::operator*(const Tensor& other) const {
+    // 1. If shapes match exactly, do the simple elementwise multiplication.
+    if (shapes_equal(this->shape, other.shape)) {
+        
+        std::vector<float> result_data(data.size());
+        for (size_t i = 0; i < data.size(); i++) {
+            result_data[i] = data[i] * other.data[i];
+        }
 
-    /* Perform elementwise multiplication */
-    std::vector<float> result_data(data.size());
-    for (size_t i = 0; i < data.size(); i++) {
-        result_data[i] = data[i] * other.data[i];
-    }
+        Tensor result(result_data, shape, requires_grad || other.requires_grad);
 
-    /* Construct result tensor */
-    Tensor result(result_data, shape, requires_grad || other.requires_grad);
-    
-    /* Construct backward function */
-    if (result.requires_grad) {
-        auto sz = data.size();
-        auto this_requires_grad = this->requires_grad;
-        auto other_requires_grad = other.requires_grad;
-        auto this_grad = this->grad;
-        auto other_grad = other.grad;
-        auto this_backward_fn = this->backward_fn;
-        auto other_backward_fn = other.backward_fn;
-        auto this_data = this->data;
-        auto other_data = other.data;
-        auto result_grad = result.grad;
+        // Build backward function if needed...
+        if (result.requires_grad) {
+            auto sz = data.size();
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto this_data = this->data;
+            auto other_data = other.data;
+            auto result_grad = result.grad;
 
-        result.backward_fn = [sz, 
-                              this_requires_grad, other_requires_grad,
-                              this_grad, other_grad,
-                              this_backward_fn, other_backward_fn,
-                              this_data, other_data, result_grad]() {
-           /*
-            * If this tensor requires its gradient and
-            * the gradient vector exists, update its gradient 
-            */
-            if (this_requires_grad && this_grad) {
-                for (size_t i = 0; i < sz; i++) {
-                    this_grad->data[i] += other_data[i] * result_grad->data[i];
+            result.backward_fn = [sz,
+                                  this_requires_grad, other_requires_grad,
+                                  this_grad, other_grad,
+                                  this_backward_fn, other_backward_fn,
+                                  this_data, other_data, result_grad]() {
+                if (this_requires_grad && this_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        this_grad->data[i] += other_data[i] * result_grad->data[i];
+                    }
+                    if (this_backward_fn) this_backward_fn();
                 }
-                /* Call the previous backward function if it exists */
-                if (this_backward_fn) this_backward_fn();
-            }
-            /*
-             * If other tensor requires its gradient and
-             * the gradient vector exists, update its gradient 
-             */
-            if (other_requires_grad && other_grad) {
-                for (size_t i = 0; i < sz; i++) {
-                    other_grad->data[i] += this_data[i] * result_grad->data[i];
+                if (other_requires_grad && other_grad) {
+                    for (size_t i = 0; i < sz; i++) {
+                        other_grad->data[i] += this_data[i] * result_grad->data[i];
+                    }
+                    if (other_backward_fn) other_backward_fn();
                 }
-                /* Call the previous backward function if it exists */
-                if (other_backward_fn) other_backward_fn();
-            }
-        };
+            };
+        }
+        return result;
     }
+    else {
+        std::vector<size_t> result_shape;
+        result_shape = broadcast(this->shape, other.shape);
+        
+        if (result_shape.empty()) {
+            printShapes(this->shape, other.shape);
+            throw std::invalid_argument("Tensor shapes must be broadcastable for addition.");
+        }
+               
+        /* Perform addition with broadcasting */
+        size_t result_size = numel(result_shape);
+        std::vector<float> result_data(result_size);
 
-    return result;
+        for (size_t i = 0; i < result_size; ++i) {
+            // Compute the multi-dimensional index in the result shape
+            std::vector<size_t> multi_index(result_shape.size(), 0);
+            size_t temp = i;
+            for (int j = result_shape.size() - 1; j >= 0; --j) {
+                multi_index[j] = temp % result_shape[j];
+                temp /= result_shape[j];
+            }
+
+            // Map to indices in the original tensors
+            size_t index_a = map_index(multi_index, this->shape);
+            size_t index_b = map_index(multi_index, other.shape);
+
+            // Perform the addition
+            result_data[i] = this->data[index_a] * other.data[index_b];
+        }
+
+        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+
+        if (result.requires_grad) {
+
+            auto this_requires_grad = this->requires_grad;
+            auto other_requires_grad = other.requires_grad;
+            auto this_grad = this->grad;
+            auto other_grad = other.grad;
+            auto this_backward_fn = this->backward_fn;
+            auto other_backward_fn = other.backward_fn;
+            auto result_grad = result.grad;
+
+            result.backward_fn = [this_requires_grad, other_requires_grad,
+                      this_grad, other_grad,
+                      this_backward_fn, other_backward_fn,
+                      result_grad, 
+                      this_data = this->data,   // capture forward data
+                      other_data = other.data,
+                      this_shape = this->shape,
+                      other_shape = other.shape,
+                      result_shape = result.shape]() 
+            {
+                // Lambda to reduce the gradient via summation after multiplication
+                auto reduce_broadcasted_grad = [](
+                    const std::vector<float>& grad_data,
+                    const std::vector<size_t>& grad_shape,
+                    const std::vector<size_t>& original_shape
+                ) -> std::vector<float>
+                {
+                    size_t original_numel = numel(original_shape);
+                    std::vector<float> reduced_grad(original_numel, 0.0f);
+
+                    int offset = grad_shape.size() - original_shape.size(); // Align dimensions
+
+                    for (size_t i = 0; i < grad_data.size(); ++i) {
+                        // Convert linear index `i` into `multi_index` in `grad_shape`
+                        std::vector<size_t> multi_index(grad_shape.size(), 0);
+                        size_t temp = i;
+                        for (int j = grad_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % grad_shape[j];
+                            temp /= grad_shape[j];
+                        }
+
+                        // Map `multi_index` to `original_shape`
+                        size_t original_index = 0;
+                        size_t stride = 1;
+                        for (int j = original_shape.size() - 1; j >= 0; --j) {
+                            int grad_index_pos = j + offset; // Correct for alignment
+
+                            // If grad_shape has more leading dimensions, ignore them
+                            size_t dim_index = (grad_index_pos >= 0) ? multi_index[grad_index_pos] : 0;
+
+                            // If original_shape[j] == 1, it was broadcasted → force index 0
+                            if (original_shape[j] == 1) dim_index = 0;
+
+                            original_index += dim_index * stride;
+                            stride *= original_shape[j];
+                        }
+
+                        // Accumulate the gradient correctly (sum over broadcasted axes)
+                        reduced_grad[original_index] += grad_data[i];
+                    }
+
+                    return reduced_grad;
+                };
+
+
+
+                // 1) Gradient w.r.t. x (this->data)
+                if (this_requires_grad && this_grad)
+                {
+                    std::vector<float> partial_grad_x(result_grad->data.size(), 0.0f);
+
+                    for (size_t i = 0; i < result_grad->data.size(); ++i) {
+                        std::vector<size_t> multi_index(result_shape.size());
+                        size_t temp = i;
+                        for (int j = result_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % result_shape[j];
+                            temp /= result_shape[j];
+                        }
+
+                        size_t index_b = map_index(multi_index, other_shape);
+                        partial_grad_x[i] = result_grad->data[i] * other_data[index_b]; // Multiply by y
+                    }
+
+                    auto reduced_grad_x = reduce_broadcasted_grad(partial_grad_x, result_shape, this_shape);
+                    
+                    for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
+                        this_grad->data[i] += reduced_grad_x[i];  // Accumulate correctly
+                    }
+
+                    if (this_backward_fn) {
+                        this_backward_fn();
+                    }
+                } 
+
+                // 2) Gradient w.r.t. y (other->data)
+                if (other_requires_grad && other_grad)
+                {
+                    std::vector<float> partial_grad_y(result_grad->data.size(), 0.0f);
+
+                    for (size_t i = 0; i < result_grad->data.size(); i++) {
+                        std::vector<size_t> multi_index(result_shape.size());
+                        size_t temp = i;
+                        for (int j = result_shape.size() - 1; j >= 0; --j) {
+                            multi_index[j] = temp % result_shape[j];
+                            temp /= result_shape[j];
+                        }
+
+                        size_t index_a = map_index(multi_index, this_shape);
+                        partial_grad_y[i] = result_grad->data[i] * this_data[index_a];
+                    }
+                    
+                    auto reduced_grad_y = reduce_broadcasted_grad(partial_grad_y, result_shape, other_shape);
+                    
+                    for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
+                        other_grad->data[i] += reduced_grad_y[i];  // Ensure correct accumulation
+                    }
+
+                    if (other_backward_fn) {
+                        other_backward_fn();
+                    }
+                }
+                
+            };
+
+
+        }
+
+        return result;
+    }
 }
 
 std::vector<size_t> Tensor::unflatten_index(size_t flat_index, const std::vector<size_t>& shape) {
@@ -436,7 +589,9 @@ std::vector<float> Tensor::reduce_grad(const std::vector<float>& grad,
 Tensor Tensor::matmul(const Tensor &other) const {
     // 1. Validate that both have at least 2 dims
     if (shape.size() < 2 || other.shape.size() < 2) {
-        throw std::invalid_argument("Both tensors must have at least 2 dimensions for matmul.");
+        throw std::invalid_argument(
+            "Both tensors must have at least 2 dimensions for matmul."
+        );
     }
 
     // 2. If both are strictly 2D, do a simpler 2D matmul (no broadcasting)
@@ -448,14 +603,16 @@ Tensor Tensor::matmul(const Tensor &other) const {
         size_t p = other.shape[1];
 
         if (n != x) {
-            throw std::invalid_argument("Inner dimensions do not match for 2D matmul.");
+            throw std::invalid_argument(
+                "Inner dimensions do not match for 2D matmul."
+            );
         }
 
         // Construct output shape [m, p]
         std::vector<size_t> result_shape = {m, p};
         std::vector<float> result_data(m * p, 0.0f);
 
-        // Forward pass: standard triple-nested loop
+        // Forward pass
         for (size_t i = 0; i < m; i++) {
             for (size_t j = 0; j < p; j++) {
                 float sum = 0.0f;
@@ -472,45 +629,51 @@ Tensor Tensor::matmul(const Tensor &other) const {
 
         // Backward pass
         if (out_requires_grad) {
-            auto A_grad = this->grad;
-            auto B_grad = other.grad;
-            auto result_grad = result.grad;
-
-            auto A_data = data;
-            auto B_data = other.data;
-
-            auto this_backward_fn = this->backward_fn;
+            // Capture everything needed by value
+            auto A_grad          = this->grad;
+            auto B_grad          = other.grad;
+            auto result_grad     = result.grad;
+            auto A_data          = data;
+            auto B_data          = other.data;
+            auto this_backward_fn  = this->backward_fn;
             auto other_backward_fn = other.backward_fn;
+
+            bool A_req_grad = requires_grad;     // local copy
+            bool B_req_grad = other.requires_grad;
 
             result.backward_fn = [=]() mutable {
                 // dA = dC * B^T
-                if (requires_grad && A_grad) {
+                if (A_req_grad && A_grad) {
                     for (size_t i = 0; i < m; i++) {
                         for (size_t k = 0; k < n; k++) {
                             float grad_val = 0.0f;
                             for (size_t j = 0; j < p; j++) {
-                                grad_val += result_grad->data[i*p + j] * B_data[k*p + j];
+                                grad_val += result_grad->data[i*p + j]
+                                          * B_data[k*p + j];
                             }
                             A_grad->data[i*n + k] += grad_val;
                         }
                     }
-                    // Chain back
-                    if (this_backward_fn) this_backward_fn();
+                    if (this_backward_fn) {
+                        this_backward_fn();
+                    }
                 }
 
                 // dB = A^T * dC
-                if (other.requires_grad && B_grad) {
+                if (B_req_grad && B_grad) {
                     for (size_t k = 0; k < n; k++) {
                         for (size_t j = 0; j < p; j++) {
                             float grad_val = 0.0f;
                             for (size_t i = 0; i < m; i++) {
-                                grad_val += A_data[i*n + k] * result_grad->data[i*p + j];
+                                grad_val += A_data[i*n + k]
+                                          * result_grad->data[i*p + j];
                             }
                             B_grad->data[k*p + j] += grad_val;
                         }
                     }
-                    // Chain back
-                    if (other_backward_fn) other_backward_fn();
+                    if (other_backward_fn) {
+                        other_backward_fn();
+                    }
                 }
             };
         }
@@ -518,14 +681,16 @@ Tensor Tensor::matmul(const Tensor &other) const {
         return result;
     }
     else {
-
+        // batched case
         size_t m = shape[shape.size() - 2];
         size_t n = shape[shape.size() - 1];
         size_t x = other.shape[other.shape.size() - 2];
         size_t p = other.shape[other.shape.size() - 1];
 
         if (n != x) {
-            throw std::invalid_argument("Inner dimensions of the tensors must match for matmul.");
+            throw std::invalid_argument(
+                "Inner dimensions of the tensors must match for matmul."
+            );
         }
 
         // (A) Determine batch shape
@@ -533,42 +698,59 @@ Tensor Tensor::matmul(const Tensor &other) const {
         std::vector<size_t> other_batch_shape;
         std::vector<size_t> batch_shape;
 
+        // If either tensor has extra dims (beyond the last 2),
+        // we must handle broadcasting those leading dims
         if (shape.size() > 2 || other.shape.size() > 2) {
-            this_batch_shape = std::vector<size_t>(shape.begin(), shape.begin() + (shape.size() - 2));
-            other_batch_shape = std::vector<size_t>(other.shape.begin(), other.shape.begin() + (other.shape.size() - 2));
+            this_batch_shape =
+                std::vector<size_t>(shape.begin(), shape.end() - 2);
+            other_batch_shape =
+                std::vector<size_t>(other.shape.begin(), other.shape.end() - 2);
 
+            // broadcast(...) is assumed to return the broadcasted shape
             batch_shape = broadcast(this_batch_shape, other_batch_shape);
             if (batch_shape.empty()) {
+                // Not broadcastable
                 this->print_shape();
                 other.print_shape();
-                throw std::invalid_argument("Tensors not broadcastable for matmul.");
+                throw std::invalid_argument(
+                    "Tensors not broadcastable for matmul."
+                );
             }
         }
-        // else: no batch dims, batch_shape remains empty => batch_size = 1
+       
+        // else: no batch dims => batch_shape stays empty => batch_size = 1
 
-        // (B) Construct result shape
+        // (B) Construct result shape: batch_shape + [m, p]
         auto result_shape = batch_shape;
         result_shape.push_back(m);
         result_shape.push_back(p);
 
         // (C) Forward pass
         size_t batch_size = 1;
-        for (auto d : batch_shape) batch_size *= d;
+        for (auto d : batch_shape) {
+            batch_size *= d;
+        }
 
         size_t total_elems = batch_size * m * p;
         std::vector<float> result_data(total_elems, 0.0f);
 
+        // Multiply each batch
         for (size_t b = 0; b < batch_size; ++b) {
+            // Convert b to multi-index in the broadcast shape
             std::vector<size_t> batch_index = Tensor::unflatten_index(b, batch_shape);
+
+            // Figure out which offsets inside A and B this corresponds to
             size_t A_offset = map_index(batch_index, this_batch_shape) * m * n;
             size_t B_offset = map_index(batch_index, other_batch_shape) * n * p;
             size_t C_offset = b * (m * p);
 
+            // Standard matrix multiply for each batch
             for (size_t i = 0; i < m; i++) {
                 for (size_t j = 0; j < p; j++) {
                     float sum = 0.0f;
                     for (size_t k = 0; k < n; k++) {
-                        sum += data[A_offset + i*n + k] * other.data[B_offset + k*p + j];
+                        sum += data[A_offset + i*n + k]
+                             * other.data[B_offset + k*p + j];
                     }
                     result_data[C_offset + i*p + j] = sum;
                 }
@@ -581,88 +763,139 @@ Tensor Tensor::matmul(const Tensor &other) const {
 
         // (E) Backward pass
         if (out_requires_grad) {
-            auto this_requires_grad = requires_grad;
+            // Capture everything needed
+            auto this_requires_grad  = requires_grad;
             auto other_requires_grad = other.requires_grad;
-            auto this_grad = this->grad;
-            auto other_grad = other.grad;
-            auto result_grad = result.grad;
 
-            auto A_data = data;
-            auto B_data = other.data;
+            auto this_grad          = this->grad;
+            auto other_grad         = other.grad;
+            auto result_grad        = result.grad;
 
-            auto this_backward_fn = this->backward_fn;
-            auto other_backward_fn = other.backward_fn;
+            auto A_data             = data;
+            auto B_data             = other.data;
 
-            auto saved_this_shape = shape;      
-            auto saved_other_shape = other.shape; 
+            auto this_backward_fn   = this->backward_fn;
+            auto other_backward_fn  = other.backward_fn;
+
+            // Save the original shapes for correct “reduce”
+            auto saved_this_shape  = shape;   // e.g. [batch_dims..., m, n]
+            auto saved_other_shape = other.shape;
             auto saved_batch_shape = batch_shape;
 
+            // We also store m,n,p because they’re needed in the lambda
+            size_t mm = m;
+            size_t nn = n;
+            size_t pp = p;
+
             result.backward_fn = [=]() mutable {
-                size_t batch_size = 1;
-                for (auto d : saved_batch_shape) batch_size *= d;
-
-            
-                // dA = dC * B^T
-                if (this_requires_grad && this_grad) {
-                    for (size_t b = 0; b < batch_size; b++) {
-                        std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
-                        size_t A_offset = map_index(batch_index,
-                                                    std::vector<size_t>(saved_this_shape.begin(),
-                                                                        saved_this_shape.end() - 2))
-                                          * (m * n);
-                        size_t B_offset = map_index(batch_index,
-                                                    std::vector<size_t>(saved_other_shape.begin(),
-                                                                        saved_other_shape.end() - 2))
-                                          * (n * p);
-                        size_t C_offset = b * (m * p);
-
-                        for (size_t i = 0; i < m; i++) {
-                            for (size_t k = 0; k < n; k++) {
-                                float grad_value = 0.0f;
-                                for (size_t j = 0; j < p; j++) {
-                                    grad_value += result_grad->data[C_offset + i*p + j]
-                                                * B_data[B_offset + k*p + j];
-                                }
-                                this_grad->data[A_offset + i*n + k] += grad_value;
-                            }
-                        }
-                    }
-                    this_grad->data = reduce_grad(this_grad->data, saved_this_shape, saved_this_shape);
-                
-                    if (this_backward_fn) this_backward_fn();
+                // (1) We compute how many total “batches” we did
+                size_t batch_size_local = 1;
+                for (auto d : saved_batch_shape) {
+                    batch_size_local *= d;
                 }
 
-                // dB = A^T * dC
-                if (other_requires_grad && other_grad) {
-                    for (size_t b = 0; b < batch_size; b++) {
-                        std::vector<size_t> batch_index = Tensor::unflatten_index(b, saved_batch_shape);
-                        size_t A_offset = map_index(batch_index,
-                                                    std::vector<size_t>(saved_this_shape.begin(),
-                                                                        saved_this_shape.end() - 2))
-                                          * (m * n);
-                        size_t B_offset = map_index(batch_index,
-                                                    std::vector<size_t>(saved_other_shape.begin(),
-                                                                        saved_other_shape.end() - 2))
-                                          * (n * p);
-                        size_t C_offset = b * (m * p);
+                // (2) dA = dC * B^T (batched)
+                if (this_requires_grad && this_grad) {
+                    // Accumulate into this_grad->data, shape is effectively
+                    // broadcasted: batch_shape + [m, n]
+                    for (size_t b = 0; b < batch_size_local; b++) {
+                        std::vector<size_t> batch_idx =
+                            Tensor::unflatten_index(b, saved_batch_shape);
 
-                        for (size_t k = 0; k < n; k++) {
-                            for (size_t j = 0; j < p; j++) {
+                        size_t A_offset = map_index(batch_idx,
+                            std::vector<size_t>(saved_this_shape.begin(),
+                                                saved_this_shape.end()-2))
+                                          * (mm * nn);
+
+                        size_t B_offset = map_index(batch_idx,
+                            std::vector<size_t>(saved_other_shape.begin(),
+                                                saved_other_shape.end()-2))
+                                          * (nn * pp);
+
+                        size_t C_offset = b * (mm * pp);
+
+                        for (size_t i = 0; i < mm; i++) {
+                            for (size_t k = 0; k < nn; k++) {
                                 float grad_value = 0.0f;
-                                for (size_t i = 0; i < m; i++) {
-                                    grad_value += A_data[A_offset + i*n + k]
-                                                * result_grad->data[C_offset + i*p + j];
+                                for (size_t j = 0; j < pp; j++) {
+                                    grad_value += result_grad->data[C_offset + i*pp + j]
+                                                * B_data[B_offset + k*pp + j];
                                 }
-                                other_grad->data[B_offset + k*p + j] += grad_value;
+                                this_grad->data[A_offset + i*nn + k] += grad_value;
                             }
                         }
                     }
-                    other_grad->data = reduce_grad(other_grad->data, saved_other_shape, saved_other_shape);
-                    if (other_backward_fn) other_backward_fn();
+
+                    // Now reduce from shape = broadcasted (batch_shape + [m, n])
+                    // down to the original this->shape if it had broadcasted dims
+                    // Build the “from_shape” for the gradient
+                    std::vector<size_t> from_shape = saved_batch_shape; // the broadcast batch
+                    from_shape.push_back(mm);
+                    from_shape.push_back(nn);
+
+                    // e.g. from_shape might be [2,4,5, m,n] if broadcast
+                    // but saved_this_shape is the real [1,4,5, m,n], etc.
+                    this_grad->data = reduce_grad(
+                        this_grad->data,
+                        from_shape,
+                        saved_this_shape
+                    );
+
+                    // Chain backward
+                    if (this_backward_fn) {
+                        this_backward_fn();
+                    }
+                }
+
+                // (3) dB = A^T * dC (batched)
+                if (other_requires_grad && other_grad) {
+                    for (size_t b = 0; b < batch_size_local; b++) {
+                        std::vector<size_t> batch_idx =
+                            Tensor::unflatten_index(b, saved_batch_shape);
+
+                        size_t A_offset = map_index(batch_idx,
+                            std::vector<size_t>(saved_this_shape.begin(),
+                                                saved_this_shape.end()-2))
+                                          * (mm * nn);
+
+                        size_t B_offset = map_index(batch_idx,
+                            std::vector<size_t>(saved_other_shape.begin(),
+                                                saved_other_shape.end()-2))
+                                          * (nn * pp);
+
+                        size_t C_offset = b * (mm * pp);
+
+                        for (size_t k = 0; k < nn; k++) {
+                            for (size_t j = 0; j < pp; j++) {
+                                float grad_value = 0.0f;
+                                for (size_t i = 0; i < mm; i++) {
+                                    grad_value += A_data[A_offset + i*nn + k]
+                                                * result_grad->data[C_offset + i*pp + j];
+                                }
+                                other_grad->data[B_offset + k*pp + j] += grad_value;
+                            }
+                        }
+                    }
+                    // reduce from broadcast shape = batch_shape + [n, p]
+                    // down to the original other.shape
+                    std::vector<size_t> from_shape = saved_batch_shape;
+                    from_shape.push_back(nn);
+                    from_shape.push_back(pp);
+
+                    other_grad->data = reduce_grad(
+                        other_grad->data,
+                        from_shape,
+                        saved_other_shape
+                    );
+
+                    // Chain backward
+                    if (other_backward_fn) {
+                        other_backward_fn();
+                    }
                 }
             };
         }
-        
+
         // Return the final result
         return result;
     }
@@ -954,4 +1187,45 @@ Tensor Tensor::mean(size_t dim) const {
 
 Tensor Tensor::mean() const {
     return mean(shape.size() - 1);
+}
+
+Tensor Tensor::exp() const {
+    std::vector<float> result_data(data.size());
+
+    for (size_t i = 0; i < data.size(); i++) {
+        result_data[i] = std::exp(data[i]);
+    }
+
+    Tensor result(result_data, shape, requires_grad);
+
+    if (result.requires_grad) {
+        auto this_requires_grad = this->requires_grad;
+        auto this_grad = this->grad;
+        auto this_data = this->data;
+        auto result_grad = result.grad;
+        auto this_backward_fn = this->backward_fn;
+
+        result.backward_fn = [=]() mutable {
+            if (this_requires_grad && this_grad) {
+                for (size_t i = 0; i < this_data.size(); i++) {
+                    this_grad->data[i] += result_grad->data[i] * result_data[i];
+                }
+                if (this_backward_fn) this_backward_fn();
+            }
+        };
+    }
+
+    return result;
+    
+}
+// TODO:
+Tensor Tensor::softmax(size_t dim) const {
+    Tensor exp_tensor = this->exp(); 
+    Tensor sum_exp = exp_tensor.sum(dim); 
+
+    return exp_tensor * sum_exp;
+}
+
+Tensor Tensor::softmax() const {
+    return softmax(shape.size() - 1);
 }

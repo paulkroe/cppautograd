@@ -1,6 +1,8 @@
 #include "cppgrad.h"
 #include <iostream>
 #include <cmath>
+#include <stack>
+#include <unordered_set>
 
 /* 
  * backward function for scalar tensors:
@@ -10,28 +12,64 @@
  * 4. Call the backward function if tensor has a backward function
  */
 void Tensor::backward() {
-    /* Check if the tensor is a scalar */
+    // Check if the tensor is a scalar (single value output)
     if (this->numel(shape) != 1) {
         throw std::runtime_error("Backward only supported for scalar outputs");
     }
 
-    /* Check if the tensor requires gradient */
+    // Check if this tensor requires gradient computation
     if (!requires_grad) {
         throw std::runtime_error("This tensor does not require gradient");
     }
-    /* Initialize gradient if necessary */
+
+    // Initialize gradient as 1.0 if it's missing (gradient of loss w.r.t. itself)
     if (!grad) {
         grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 1.0f), shape, false);
     } else {
-        /* Ensure the gradient is explicitly set to 1.0 for the target */
         std::fill(grad->data.begin(), grad->data.end(), 1.0f);
     }
 
-    /* Call the backward function of the target tensor */
-    if (backward_fn) {
-        backward_fn();
+    // Stack for iterative backpropagation (avoiding recursion)
+    std::stack<Tensor*> stack;
+    std::unordered_set<Tensor*> visited;  // To track executed nodes
+    std::unordered_map<Tensor*, std::vector<float>> accumulated_grads;
+
+    stack.push(this);
+
+    while (!stack.empty()) {
+        Tensor* current = stack.top();
+        stack.pop();
+
+        // Skip if already processed
+        if (visited.count(current)) continue;
+        visited.insert(current);
+
+        // Ensure it has a gradient storage
+        if (!current->grad) {
+            current->grad = std::make_shared<Tensor>(
+                std::vector<float>(current->data.size(), 0.0f), current->shape, false
+            );
+        }
+
+        // Accumulate gradients from child nodes
+        if (accumulated_grads.count(current)) {
+            for (size_t i = 0; i < current->grad->data.size(); i++) {
+                current->grad->data[i] += accumulated_grads[current][i];
+            }
+        }
+
+        // Execute the backward function if it exists
+        if (current->backward_fn) {
+            current->backward_fn();
+        }
+
+        // Push parent nodes onto the stack (ensuring they execute later)
+        for (const auto& parent : current->parents) {  // ✅ Properly extract parent Tensor
+            stack.push(parent.get());  // ✅ Extract raw pointer from shared_ptr<Tensor>
+        }
     }
 }
+
 
 /* 
  * Helper function to infer broadcast shape 
@@ -89,10 +127,10 @@ Tensor Tensor::operator+(const Tensor& other) const{
         }
 
         /* Construct result tensor */
-        Tensor result(result_data, shape, requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, shape, requires_grad || other.requires_grad);
 
         /* Construct backward function */
-        if (result.requires_grad) {
+        if (result->requires_grad) {
             /* 
             * Capture references to required tensor data and metadata
             * (e.g., grad pointers, backward functions) to ensure they remain
@@ -106,9 +144,14 @@ Tensor Tensor::operator+(const Tensor& other) const{
             auto other_grad = other.grad;
             auto this_backward_fn = this->backward_fn;
             auto other_backward_fn = other.backward_fn;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [sz, 
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [sz, 
                                 this_requires_grad, other_requires_grad,
                                 this_grad, other_grad,
                                 this_backward_fn, other_backward_fn,
@@ -122,8 +165,6 @@ Tensor Tensor::operator+(const Tensor& other) const{
                     for (size_t i = 0; i < sz; i++) {
                         this_grad->data[i] += result_grad->data[i];
                     }
-                    /* Call the previous backward function if it exists */
-                    if (this_backward_fn) this_backward_fn();
                 }
 
                 /* 
@@ -134,13 +175,11 @@ Tensor Tensor::operator+(const Tensor& other) const{
                     for (size_t i = 0; i < sz; i++) {
                         other_grad->data[i] += result_grad->data[i];
                     }
-                    /* Call the previous backward function if it exists */
-                    if (other_backward_fn) other_backward_fn();
                 }
             };
         }
 
-        return result;       
+        return *result;       
     }
     else {
         std::vector<size_t> result_shape;
@@ -172,9 +211,9 @@ Tensor Tensor::operator+(const Tensor& other) const{
             result_data[i] = this->data[index_a] + other.data[index_b];
         }
 
-        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
 
-        if (result.requires_grad) {
+        if (result->requires_grad) {
 
             auto sz = data.size();
             auto this_requires_grad = this->requires_grad;
@@ -183,14 +222,19 @@ Tensor Tensor::operator+(const Tensor& other) const{
             auto other_grad = other.grad;
             auto this_backward_fn = this->backward_fn;
             auto other_backward_fn = other.backward_fn;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [sz,
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [sz,
                                 this_requires_grad, other_requires_grad,
                                 this_grad, other_grad,
                                 this_backward_fn, other_backward_fn,
                                 result_grad, this_shape = this->shape, other_shape = other.shape,
-                                result_shape = result.shape]() {
+                                result_shape = result->shape]() {
 
                 // Lambda to compute the reduction for broadcasting
                 auto reduce_broadcasted_grad = [](
@@ -244,7 +288,6 @@ Tensor Tensor::operator+(const Tensor& other) const{
                     for (size_t i = 0; i < reduced_grad.size(); ++i) {
                         this_grad->data[i] += reduced_grad[i];
                     }
-                    if (this_backward_fn) this_backward_fn();
                 }
 
                 // Backpropagate gradient for the second tensor
@@ -253,13 +296,12 @@ Tensor Tensor::operator+(const Tensor& other) const{
                     for (size_t i = 0; i < reduced_grad.size(); ++i) {
                         other_grad->data[i] += reduced_grad[i];
                     }
-                    if (other_backward_fn) other_backward_fn();
                 }
             };
 
         }
 
-        return result;
+        return *result;
     }
 
 }
@@ -290,10 +332,10 @@ Tensor Tensor::operator-() const {
     }
 
     /* Construct result tensor */
-    Tensor result(negated_data, shape, requires_grad, negated_grad);
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(negated_data, shape, requires_grad, negated_grad);
 
     /* Construct backward function */
-    if (result.requires_grad) {
+    if (result->requires_grad) {
          /* 
          * Capture references to required tensor data and metadata
          * (e.g., grad pointers, backward functions) to ensure they remain
@@ -304,9 +346,12 @@ Tensor Tensor::operator-() const {
         auto this_requires_grad = this->requires_grad;
         auto this_grad = this->grad;
         auto this_backward_fn = this->backward_fn;
-        auto result_grad = result.grad;
+        auto result_grad = result->grad;
 
-        result.backward_fn = [sz,
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+
+        result->backward_fn = [sz,
                               this_requires_grad, this_grad,
                               this_backward_fn, result_grad]() {
             if (this_requires_grad && this_grad) {
@@ -317,13 +362,11 @@ Tensor Tensor::operator-() const {
                 for (size_t i = 0; i < sz; i++) {
                     this_grad->data[i] -= result_grad->data[i];
                 }
-                /* Call the previous backward function if it exists */
-                if (this_backward_fn) this_backward_fn();
             }
         };
     }
 
-    return result;
+    return *result;
 }
 
 /* 
@@ -352,10 +395,10 @@ Tensor Tensor::operator*(const Tensor& other) const {
             result_data[i] = data[i] * other.data[i];
         }
 
-        Tensor result(result_data, shape, requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, shape, requires_grad || other.requires_grad);
 
         // Build backward function if needed...
-        if (result.requires_grad) {
+        if (result->requires_grad) {
             auto sz = data.size();
             auto this_requires_grad = this->requires_grad;
             auto other_requires_grad = other.requires_grad;
@@ -365,9 +408,16 @@ Tensor Tensor::operator*(const Tensor& other) const {
             auto other_backward_fn = other.backward_fn;
             auto this_data = this->data;
             auto other_data = other.data;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [sz,
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+                
+
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [sz,
                                   this_requires_grad, other_requires_grad,
                                   this_grad, other_grad,
                                   this_backward_fn, other_backward_fn,
@@ -376,17 +426,15 @@ Tensor Tensor::operator*(const Tensor& other) const {
                     for (size_t i = 0; i < sz; i++) {
                         this_grad->data[i] += other_data[i] * result_grad->data[i];
                     }
-                    if (this_backward_fn) this_backward_fn();
                 }
                 if (other_requires_grad && other_grad) {
                     for (size_t i = 0; i < sz; i++) {
                         other_grad->data[i] += this_data[i] * result_grad->data[i];
                     }
-                    if (other_backward_fn) other_backward_fn();
                 }
             };
         }
-        return result;
+        return *result;
     }
     else {
         std::vector<size_t> result_shape;
@@ -418,9 +466,10 @@ Tensor Tensor::operator*(const Tensor& other) const {
             result_data[i] = this->data[index_a] * other.data[index_b];
         }
 
-        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
 
-        if (result.requires_grad) {
+
+        if (result->requires_grad) {
 
             auto this_requires_grad = this->requires_grad;
             auto other_requires_grad = other.requires_grad;
@@ -428,9 +477,14 @@ Tensor Tensor::operator*(const Tensor& other) const {
             auto other_grad = other.grad;
             auto this_backward_fn = this->backward_fn;
             auto other_backward_fn = other.backward_fn;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [this_requires_grad, other_requires_grad,
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this)); 
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+            
+            result->backward_fn = [this_requires_grad, other_requires_grad,
                       this_grad, other_grad,
                       this_backward_fn, other_backward_fn,
                       result_grad, 
@@ -438,7 +492,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
                       other_data = other.data,
                       this_shape = this->shape,
                       other_shape = other.shape,
-                      result_shape = result.shape]() 
+                      result_shape = result->shape]() 
             {
                 // Lambda to reduce the gradient via summation after multiplication
                 auto reduce_broadcasted_grad = [](
@@ -509,9 +563,6 @@ Tensor Tensor::operator*(const Tensor& other) const {
                         this_grad->data[i] += reduced_grad_x[i];  // Accumulate correctly
                     }
 
-                    if (this_backward_fn) {
-                        this_backward_fn();
-                    }
                 } 
 
                 // 2) Gradient w.r.t. y (other->data)
@@ -537,9 +588,6 @@ Tensor Tensor::operator*(const Tensor& other) const {
                         other_grad->data[i] += reduced_grad_y[i];  // Ensure correct accumulation
                     }
 
-                    if (other_backward_fn) {
-                        other_backward_fn();
-                    }
                 }
                 
             };
@@ -547,7 +595,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
 
         }
 
-        return result;
+        return *result;
     }
 }
 
@@ -559,11 +607,10 @@ Tensor Tensor::operator/(const Tensor& other) const {
         for (size_t i = 0; i < data.size(); i++) {
             result_data[i] = data[i] / other.data[i];  // Division
         }
-
-        Tensor result(result_data, shape, requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, shape, requires_grad || other.requires_grad);
 
         // Build backward function if needed...
-        if (result.requires_grad) {
+        if (result->requires_grad) {
             auto sz = data.size();
             auto this_requires_grad = this->requires_grad;
             auto other_requires_grad = other.requires_grad;
@@ -573,9 +620,15 @@ Tensor Tensor::operator/(const Tensor& other) const {
             auto other_backward_fn = other.backward_fn;
             auto this_data = this->data;
             auto other_data = other.data;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [sz,
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [sz,
                                   this_requires_grad, other_requires_grad,
                                   this_grad, other_grad,
                                   this_backward_fn, other_backward_fn,
@@ -584,17 +637,15 @@ Tensor Tensor::operator/(const Tensor& other) const {
                     for (size_t i = 0; i < sz; i++) {
                         this_grad->data[i] += result_grad->data[i] / other_data[i];  // ∂L/∂a = 1/b
                     }
-                    if (this_backward_fn) this_backward_fn();
                 }
                 if (other_requires_grad && other_grad) {
                     for (size_t i = 0; i < sz; i++) {
                         other_grad->data[i] -= (this_data[i] * result_grad->data[i]) / (other_data[i] * other_data[i]);  // ∂L/∂b = -a / b^2
                     }
-                    if (other_backward_fn) other_backward_fn();
                 }
             };
         }
-        return result;
+        return *result;
     }
     else {
         std::vector<size_t> result_shape;
@@ -626,9 +677,9 @@ Tensor Tensor::operator/(const Tensor& other) const {
             result_data[i] = this->data[index_a] / other.data[index_b];
         }
 
-        Tensor result = Tensor(result_data, result_shape, this->requires_grad || other.requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
 
-        if (result.requires_grad) {
+        if (result->requires_grad) {
 
             auto this_requires_grad = this->requires_grad;
             auto other_requires_grad = other.requires_grad;
@@ -636,17 +687,23 @@ Tensor Tensor::operator/(const Tensor& other) const {
             auto other_grad = other.grad;
             auto this_backward_fn = this->backward_fn;
             auto other_backward_fn = other.backward_fn;
-            auto result_grad = result.grad;
+            auto result_grad = result->grad;
 
-            result.backward_fn = [this_requires_grad, other_requires_grad,
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [this_requires_grad, other_requires_grad,
                       this_grad, other_grad,
                       this_backward_fn, other_backward_fn,
                       result_grad, 
-                      this_data = this->data,   // capture forward data
+                      this_data = this->data,
                       other_data = other.data,
                       this_shape = this->shape,
                       other_shape = other.shape,
-                      result_shape = result.shape]() 
+                      result_shape = result->shape]() 
             {
                 // Lambda to reduce the gradient via summation after division
                 auto reduce_broadcasted_grad = [](
@@ -715,10 +772,6 @@ Tensor Tensor::operator/(const Tensor& other) const {
                     for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
                         this_grad->data[i] += reduced_grad_x[i];  // Accumulate correctly
                     }
-
-                    if (this_backward_fn) {
-                        this_backward_fn();
-                    }
                 } 
 
                 // 2) Gradient w.r.t. y (other->data)
@@ -747,7 +800,7 @@ Tensor Tensor::operator/(const Tensor& other) const {
                 }
             };
         }
-        return result;
+        return *result;
     }
 }
 
@@ -824,15 +877,14 @@ Tensor Tensor::matmul(const Tensor &other) const {
         }
 
         // Create output tensor
-        bool out_requires_grad = (requires_grad || other.requires_grad);
-        Tensor result(result_data, result_shape, out_requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
 
         // Backward pass
-        if (out_requires_grad) {
+        if (result->requires_grad) {
             // Capture everything needed by value
             auto A_grad          = this->grad;
             auto B_grad          = other.grad;
-            auto result_grad     = result.grad;
+            auto result_grad     = result->grad;
             auto A_data          = data;
             auto B_data          = other.data;
             auto this_backward_fn  = this->backward_fn;
@@ -841,7 +893,12 @@ Tensor Tensor::matmul(const Tensor &other) const {
             bool A_req_grad = requires_grad;     // local copy
             bool B_req_grad = other.requires_grad;
 
-            result.backward_fn = [=]() mutable {
+            if (A_req_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            if (B_req_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [=]() mutable {
                 // dA = dC * B^T
                 if (A_req_grad && A_grad) {
                     for (size_t i = 0; i < m; i++) {
@@ -853,9 +910,6 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             }
                             A_grad->data[i*n + k] += grad_val;
                         }
-                    }
-                    if (this_backward_fn) {
-                        this_backward_fn();
                     }
                 }
 
@@ -871,14 +925,11 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             B_grad->data[k*p + j] += grad_val;
                         }
                     }
-                    if (other_backward_fn) {
-                        other_backward_fn();
-                    }
                 }
             };
         }
 
-        return result;
+        return *result;
     }
     else {
         // batched case
@@ -958,18 +1009,17 @@ Tensor Tensor::matmul(const Tensor &other) const {
         }
 
         // (D) Build result
-        bool out_requires_grad = (requires_grad || other.requires_grad);
-        Tensor result(result_data, result_shape, out_requires_grad);
+        std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
 
         // (E) Backward pass
-        if (out_requires_grad) {
+        if (result->requires_grad) {
             // Capture everything needed
             auto this_requires_grad  = requires_grad;
             auto other_requires_grad = other.requires_grad;
 
             auto this_grad          = this->grad;
             auto other_grad         = other.grad;
-            auto result_grad        = result.grad;
+            auto result_grad        = result->grad;
 
             auto A_data             = data;
             auto B_data             = other.data;
@@ -987,7 +1037,13 @@ Tensor Tensor::matmul(const Tensor &other) const {
             size_t nn = n;
             size_t pp = p;
 
-            result.backward_fn = [=]() mutable {
+            if (this_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(*this));
+            
+            if (other_requires_grad)
+                result->parents.push_back(std::make_shared<Tensor>(other));
+
+            result->backward_fn = [=]() mutable {
                 // (1) We compute how many total “batches” we did
                 size_t batch_size_local = 1;
                 for (auto d : saved_batch_shape) {
@@ -1041,10 +1097,6 @@ Tensor Tensor::matmul(const Tensor &other) const {
                         saved_this_shape
                     );
 
-                    // Chain backward
-                    if (this_backward_fn) {
-                        this_backward_fn();
-                    }
                 }
 
                 // (3) dB = A^T * dC (batched)
@@ -1088,16 +1140,12 @@ Tensor Tensor::matmul(const Tensor &other) const {
                         saved_other_shape
                     );
 
-                    // Chain backward
-                    if (other_backward_fn) {
-                        other_backward_fn();
-                    }
                 }
             };
         }
 
         // Return the final result
-        return result;
+        return *result;
     }
 }
 
@@ -1164,26 +1212,28 @@ Tensor Tensor::sum(size_t dim) const {
     //
     // 5. Create the reduced tensor
     //
-    Tensor result(result_data, new_shape, requires_grad);
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, new_shape, requires_grad);
 
     //
     // 6. Set up backward function
     //
-    if (result.requires_grad) {
+    if (result->requires_grad) {
         auto this_requires_grad = this->requires_grad;
         auto this_grad = this->grad;
         auto this_shape = this->shape;    // shape BEFORE reduction
-        auto result_grad = result.grad;
-        auto result_shape = result.shape; // shape AFTER reduction
+        auto result_grad = result->grad;
+        auto result_shape = result->shape; // shape AFTER reduction
         auto this_backward_fn = this->backward_fn;
 
         // We need to remember which dimension we reduced
         // so we can expand gradients back in backward pass
         auto reduced_dim = dim;
 
-        result.backward_fn = [=]() mutable {
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+
+        result->backward_fn = [=]() mutable {
             if (this_requires_grad && this_grad) {
-                //
                 // We'll expand `result_grad` (shape = result_shape)
                 // back to `this_shape`. 
                 // For each element in the result_grad, we broadcast
@@ -1232,13 +1282,10 @@ Tensor Tensor::sum(size_t dim) const {
             }
 
             // Chain backward if there's a previous op
-            if (this_backward_fn) {
-                this_backward_fn();
-            }
         };
     }
 
-    return result;
+    return *result;
 }
 
 Tensor Tensor::sum() const {
@@ -1307,24 +1354,27 @@ Tensor Tensor::mean(size_t dim) const {
     //
     // 5. Create the reduced (mean) tensor
     //
-    Tensor result(result_data, new_shape, requires_grad);
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, new_shape, requires_grad);
 
     //
     // 6. If requires_grad, define the backward function
     //
-    if (result.requires_grad) {
+    if (result->requires_grad) {
         // We'll capture everything needed in the lambda
         auto this_requires_grad = this->requires_grad;
         auto this_grad = this->grad;     // gradient buffer for the original
         auto this_shape = this->shape;   // original shape
         auto this_data = this->data;     // optional, if needed
-        auto result_grad = result.grad;  // gradient buffer for the reduced tensor
-        auto result_shape = result.shape;
+        auto result_grad = result->grad;  // gradient buffer for the reduced tensor
+        auto result_shape = result->shape;
         auto this_backward_fn = this->backward_fn;
         size_t reduced_dim = dim;        // dimension we reduced
         float divisor_f = divisor;       // shape[dim], as float
 
-        result.backward_fn = [=]() mutable {
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+
+        result->backward_fn = [=]() mutable {
             if (this_requires_grad && this_grad) {
                 //
                 // We need to broadcast each element of result_grad
@@ -1375,14 +1425,10 @@ Tensor Tensor::mean(size_t dim) const {
                 }
             }
 
-            // Chain backward if there was a previous operation
-            if (this_backward_fn) {
-                this_backward_fn();
-            }
         };
     }
 
-    return result;
+    return *result;
 }
 
 Tensor Tensor::mean() const {
@@ -1390,38 +1436,46 @@ Tensor Tensor::mean() const {
 }
 
 Tensor Tensor::exp() const {
-    std::vector<float> result_data(data.size());
-
+    // 1) Compute exp elementwise
+    std::vector<float> forward_data(data.size());
     for (size_t i = 0; i < data.size(); i++) {
-        result_data[i] = std::exp(data[i]);
+        forward_data[i] = std::exp(data[i]);
     }
 
-    Tensor result(result_data, shape, requires_grad);
+    // 2) Create the output tensor
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(forward_data, shape, requires_grad);
 
-    if (result.requires_grad) {
+    // 3) If we need gradients, set up the backward function
+    if (result->requires_grad) {
+        // Capture only what's needed in the lambda
         auto this_requires_grad = this->requires_grad;
-        auto this_grad = this->grad;
-        auto this_data = this->data;
-        auto result_grad = result.grad;
+        auto this_grad    = this->grad;   // Gradient buffer of the input
+        auto this_data    = this->data;   // For completeness, if needed
+        auto out_data     = result->data;  // The exp(...) values we just computed
+        auto result_grad  = result->grad;
         auto this_backward_fn = this->backward_fn;
 
-        result.backward_fn = [=]() mutable {
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+
+        result->backward_fn = [=]() mutable {
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
-                    this_grad->data[i] += result_grad->data[i] * result_data[i];
+                    // out_data[i] is exp(this_data[i])
+                    this_grad->data[i] += result_grad->data[i] * out_data[i];
                 }
-                if (this_backward_fn) this_backward_fn();
             }
         };
     }
 
-    return result;
-    
+    return *result;
 }
+
 // TODO:
 Tensor Tensor::softmax(size_t dim) const {
     Tensor exp_tensor = this->exp(); 
-    Tensor sum_exp = exp_tensor.sum(dim); 
+    Tensor sum_exp = exp_tensor.sum(dim) + Tensor({1e-6}, {1}); // Add a small epsilon to avoid division by zero
+    sum_exp.shape.push_back(1); // Add a new dimension for broadcasting 
 
     return exp_tensor / sum_exp;
 }

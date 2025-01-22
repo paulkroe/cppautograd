@@ -14,6 +14,7 @@ public:
     bool requires_grad;
     std::shared_ptr<Tensor> grad;
     std::function<void()> backward_fn;
+    std::vector<std::shared_ptr<Tensor>> parents;
 
     // Constructor that infers shape as 1D
     Tensor(const std::vector<float>& data, bool requires_grad = false)

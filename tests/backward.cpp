@@ -76,7 +76,7 @@ void test_scalars() {
 void compare_tensors(const std::vector<float>& cpp_data, const torch::Tensor& torch_tensor, const std::string& test_name) {
     auto torch_data = torch_tensor.flatten().data_ptr<float>();
     for (size_t i = 0; i < cpp_data.size(); ++i) {
-        if (std::abs(cpp_data[i] - torch_data[i]) > 0.1) {
+        if (std::abs(cpp_data[i] - torch_data[i]) > 1e-4) {
             std::cerr << test_name << " FAILED at index " << i << ": " << cpp_data[i] << " (cpp) vs " << torch_data[i] << " (torch).\n";
             std::cerr << "Difference: " << std::abs(cpp_data[i] - torch_data[i]) << std::endl;
             return;
@@ -171,6 +171,58 @@ void test_multidimensional() {
         compare_tensors(a_cpp.grad->data, a_torch.grad(), "Matrix Vector Gradient (a)");
         compare_tensors(b_cpp.grad->data, b_torch.grad(), "Matrix Vector Gradient (b)");
     }
+
+    {
+        std::cout << "Test Exp 1: Basic Forward + Sum\n";
+
+        //--- C++ side ---//
+        // 1) Create a small tensor x with requires_grad=true
+        Tensor x_cpp({0.0, 1.0, 2.0}, {3}, true);
+        // 2) Apply exp
+        Tensor y_cpp = x_cpp.exp();
+        // 3) sum and backward
+        Tensor sum_cpp = y_cpp.sum();
+        sum_cpp.backward();
+
+        //--- PyTorch side ---//
+        auto x_torch = torch::tensor({0.0f, 1.0f, 2.0f}, torch::requires_grad());
+        auto y_torch = x_torch.exp();
+        auto sum_torch = y_torch.sum();
+        sum_torch.backward();
+
+        // Compare forward data
+        compare_tensors(y_cpp.data, y_torch, "Exp Forward");
+        // Compare gradient wrt x
+        compare_tensors(x_cpp.grad->data, x_torch.grad(), "Exp Gradient (sum)");
+    }
+
+    {
+        std::cout << "Test Exp 2: Multiply x * exp(x) + sum\n";
+
+        //--- C++ side ---//
+        Tensor x_cpp({-1.0, 0.0, 3.0}, {3}, true);
+        // e = exp(x)
+        Tensor e_cpp = x_cpp.exp();
+        // z = x * e
+        Tensor z_cpp = x_cpp * e_cpp;  // you likely have operator* for elementwise multiply
+        Tensor y_cpp = z_cpp.sum();
+        y_cpp.backward();
+
+        //--- PyTorch side ---//
+        auto x_torch = torch::tensor({-1.0f, 0.0f, 3.0f}, torch::requires_grad());
+        auto e_torch = x_torch.exp();
+        auto z_torch = x_torch * e_torch;
+        auto y_torch = z_torch.sum();
+        y_torch.backward();
+
+        // Compare forward z
+        compare_tensors(z_cpp.data, z_torch, "x*exp(x) forward");
+        // Compare final sum
+        compare_tensors(y_cpp.data, y_torch, "x*exp(x) sum");
+        // Compare gradient wrt x
+        compare_tensors(x_cpp.grad->data, x_torch.grad(), "x*exp(x) gradient");
+    }
+
     // Test 5: Matrix multiplication
     {
         std::cout << "Test 5: Matrix multiplication\n";
@@ -332,7 +384,7 @@ void test_batched_operations() {
     }
 
     {
-        std::cout << "Test 3: Broadcasting Division\n";
+        std::cout << "Test 3: Broadcasting Division (1)\n";
         // Shape (2, 2, 1)
         Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {2, 2, 1}, true);
         // Shape (2)
@@ -349,6 +401,223 @@ void test_batched_operations() {
         compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcasted Division Gradient (a)");
         compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcasted Division Gradient (b)");
 
+    }
+
+    {
+        std::cout << "Test 5: Broadcasting Division (3D vs 3D, partial matching)\n";
+        
+        // a_cpp: shape (2, 3, 4)
+        Tensor a_cpp({
+            // 2 batches of 3x4
+            // batch 1
+            1.0,  2.0,  3.0,  4.0,
+            5.0,  6.0,  7.0,  8.0,
+            9.0,  10.0, 11.0, 12.0,
+            // batch 2
+            13.0, 14.0, 15.0, 16.0,
+            17.0, 18.0, 19.0, 20.0,
+            21.0, 22.0, 23.0, 24.0
+        }, {2, 3, 4}, true);
+
+        // b_cpp: shape (2, 1, 4)
+        Tensor b_cpp({
+            // broadcast over the second dimension
+            // batch 1
+            2.0,  2.0,  3.0,  3.0,
+            // batch 2
+            4.0,  4.0,  5.0,  5.0
+        }, {2, 1, 4}, true);
+
+        // Forward
+        Tensor c_cpp = (a_cpp / b_cpp).sum().sum().sum();
+        c_cpp.backward();
+
+        // Torch equivalents
+        auto a_torch = torch::tensor({
+            // batch 1
+            { {1.0,  2.0,  3.0,  4.0},
+            {5.0,  6.0,  7.0,  8.0},
+            {9.0,  10.0, 11.0, 12.0} },
+            // batch 2
+            { {13.0, 14.0, 15.0, 16.0},
+            {17.0, 18.0, 19.0, 20.0},
+            {21.0, 22.0, 23.0, 24.0} }
+        }, torch::requires_grad());
+
+        auto b_torch = torch::tensor({
+            // batch 1
+            { {2.0, 2.0, 3.0, 3.0} },
+            // batch 2
+            { {4.0, 4.0, 5.0, 5.0} }
+        }, torch::requires_grad());
+
+        auto c_torch = (a_torch / b_torch).sum().sum().sum();
+        c_torch.backward();
+
+        // Compare results
+        compare_tensors(c_cpp.data, c_torch, "Broadcasted Division Result (3D vs 3D)");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcasted Division Gradient (a, 3D vs 3D)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcasted Division Gradient (b, 3D vs 3D)");
+    }
+
+    {
+        std::cout << "Test 6: Broadcasting Division (tensor vs scalar)\n";
+
+        // a_cpp: shape (3, 2)
+        Tensor a_cpp({
+            1.0, 2.0,
+            3.0, 4.0,
+            5.0, 6.0
+        }, {3, 2}, true);
+
+        // b_cpp: shape (1) -> scalar 2.0
+        Tensor b_cpp({2.0}, {1}, true);
+
+        // Forward
+        Tensor c_cpp = (a_cpp / b_cpp).sum().sum();
+        c_cpp.backward();
+
+        // Torch equivalents
+        auto a_torch = torch::tensor({
+            {1.0, 2.0},
+            {3.0, 4.0},
+            {5.0, 6.0}
+        }, torch::requires_grad());
+
+        auto b_torch = torch::tensor({2.0}, torch::requires_grad());
+        auto c_torch = (a_torch / b_torch).sum().sum();
+        c_torch.backward();
+
+        // Compare results
+        compare_tensors(c_cpp.data, c_torch, "Broadcasted Div (tensor vs scalar) - value");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcasted Div (tensor vs scalar) - grad(a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcasted Div (tensor vs scalar) - grad(b)");
+    }
+
+    {
+        std::cout << "Test 7: Broadcasting Division (multi-dimensional)\n";
+
+        // a_cpp: shape (1, 3, 1)
+        // We'll just store 3 values: 
+        // data layout: { 1.0, 2.0, 3.0 }
+        Tensor a_cpp({1.0, 2.0, 3.0}, {1, 3, 1}, true);
+
+        // b_cpp: shape (2, 1, 4)
+        // We'll store 8 values in row-major:
+        // Let's do something like:
+        // b[0,0,:] = [2, 4, 6, 8]
+        // b[1,0,:] = [1, 3, 5, 7]
+        Tensor b_cpp({2.0, 4.0, 6.0, 8.0, 
+                    1.0, 3.0, 5.0, 7.0}, {2, 1, 4}, true);
+
+        // Forward operation
+        // The result is shape (2, 3, 4), then we sum all elements
+        Tensor c_cpp = (a_cpp / b_cpp).sum().sum().sum();
+        c_cpp.backward();
+
+        // Torch equivalents
+        auto a_torch = torch::tensor({
+            { {1.0}, {2.0}, {3.0} }
+        }, torch::requires_grad());  // shape (1,3,1)
+
+        // shape (2,1,4)
+        auto b_torch = torch::tensor({
+            { {2.0, 4.0, 6.0, 8.0} },
+            { {1.0, 3.0, 5.0, 7.0} },
+        }, torch::requires_grad());
+
+        auto c_torch = (a_torch / b_torch).sum().sum().sum();
+        c_torch.backward();
+
+        // Compare
+        compare_tensors(c_cpp.data, c_torch, "Broadcasted Div (1,3,1) vs (2,1,4) - value");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcasted Div (1,3,1) vs (2,1,4) - grad(a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcasted Div (1,3,1) vs (2,1,4) - grad(b)");
+    }
+
+    {
+        std::cout << "Test 8: Broadcasting Division with extra ops\n";
+
+        // a_cpp: shape (2, 2)
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {2, 2}, true);
+
+        // b_cpp: shape (2, 1)
+        Tensor b_cpp({2.0, 3.0}, {2, 1}, true);
+
+        // Forward: do (a_cpp / b_cpp) + a_cpp, then sum
+        // This checks that we can handle broadcasting in the division, 
+        // but still accumulate gradient from the addition as well.
+        Tensor c_cpp = ((a_cpp / b_cpp) + a_cpp).sum().sum();
+        c_cpp.backward();
+
+        // Torch equivalents
+        auto a_torch = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::requires_grad());
+        auto b_torch = torch::tensor({{2.0}, {3.0}}, torch::requires_grad());
+
+        auto c_torch = ((a_torch / b_torch) + a_torch).sum().sum();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Broadcast Div + Add - value");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcast Div + Add - grad(a)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcast Div + Add - grad(b)");
+    }
+
+    {
+        std::cout << "Test 4: Broadcasting Division (2)\n";
+        // Shape (2, 2)
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {2, 2}, true);
+        // Shape (2)
+        Tensor b_cpp({6.0}, {1}, true);
+        Tensor c_cpp = (a_cpp / b_cpp).sum().sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::requires_grad());
+        auto b_torch = torch::tensor({6.0}, torch::requires_grad());
+        auto c_torch = (a_torch / b_torch).sum().sum();
+        c_torch.backward(); 
+
+        compare_tensors(c_cpp.data, c_torch, "Broadcassted Division Result (2)");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Broadcasted Division Gradient (a) (2)");
+        compare_tensors(b_cpp.grad->data, b_torch.grad(), "Broadcasted Division Gradient (b) (2)");
+
+    }
+
+    {
+        std::cout << "Test 4: Softmax\n";
+        // Shape (2, 2, 1)
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
+        Tensor c_cpp = a_cpp.softmax(0).sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
+        auto c_torch = torch::nn::functional::softmax(a_torch, 0).sum();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Softmax Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Softmax Gradient (a)");
+    }
+
+    {
+        std::cout << "Test 5: Man Softmax\n";
+        
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
+        Tensor a_cpp_exp = a_cpp.exp();
+        Tensor a_cpp_sum = a_cpp_exp.sum();
+        Tensor c_cpp = (a_cpp_exp / a_cpp_sum).sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
+        auto a_torch_exp = a_torch.exp();
+        a_torch_exp.retain_grad();
+        auto a_torch_sum = a_torch_exp.sum();
+        a_torch_sum.retain_grad();
+        auto c_torch = (a_torch_exp / a_torch_sum).sum();
+        c_torch.backward();
+        
+        compare_tensors(c_cpp.data, c_torch, "Man Softmax Result");
+        compare_tensors(a_cpp_exp.grad->data, a_torch_exp.grad(), "Exp Softmax Gradient");
+        // compare_tensors(a_cpp_sum.grad->data, a_torch_sum.grad(), "Sum Softmax Gradient");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Man Softmax Gradient (a)");
     }
 }
 
@@ -380,6 +649,47 @@ void test_large_matrix_multiplication() {
     // compare_tensors(c_cpp.grad->data, c_torch.grad(), "Matrix Multiplication Gradient (c)");
 }
 
+void test_softmax_debug() {
+        /*
+        std::cout << "Test 5: Man Softmax\n";
+        
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
+        Tensor a_cpp_exp = a_cpp.exp();
+        Tensor a_cpp_sum = a_cpp_exp.sum();
+        Tensor c_cpp = (a_cpp_exp / a_cpp_sum).sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
+        auto a_torch_exp = a_torch.exp();
+        a_torch_exp.retain_grad();
+        auto a_torch_sum = a_torch_exp.sum();
+        a_torch_sum.retain_grad();
+        auto c_torch = (a_torch_exp / a_torch_sum).sum();
+        c_torch.backward();
+        
+        compare_tensors(c_cpp.data, c_torch, "Man Softmax Result");
+        compare_tensors(a_cpp_exp.grad->data, a_torch_exp.grad(), "Exp Softmax Gradient");
+        // compare_tensors(a_cpp_sum.grad->data, a_torch_sum.grad(), "Sum Softmax Gradient");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Man Softmax Gradient (a)");
+        */
+
+
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
+        Tensor a_cpp_exp = a_cpp.exp();
+        Tensor b_cpp = a_cpp_exp + a_cpp_exp;
+        Tensor c_cpp = b_cpp.sum();
+        c_cpp.backward();
+        std::cout << "a_cpp: " << a_cpp << std::endl;
+
+        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
+        auto a_torch_exp = a_torch.exp();
+        auto b_torch = a_torch_exp + a_torch_exp;
+        auto c_torch = b_torch.sum();
+        c_torch.backward();
+        std::cout << "a_torch: " << a_torch.grad() << std::endl;
+}
+
+
 int main() {
     std::cout << "Testing scalar operations...\n";
     test_scalars();
@@ -392,6 +702,7 @@ int main() {
 
     std::cout << "\nTesting large matrix multiplication...\n";
     test_large_matrix_multiplication();
-
+    
+    // test_softmax_debug();
     return 0;
 }

@@ -837,6 +837,26 @@ void test_batched_operations() {
         // compare_tensors(a_cpp_sum.grad->data, a_torch_sum.grad(), "Sum Softmax Gradient");
         compare_tensors(a_cpp.grad->data, a_torch.grad(), "Man Softmax Gradient (a)");
     }
+
+    // Test relu activation
+    {
+        Tensor a_cpp({-1.0, 2.0, -3.0, 4.0}, {4}, true);
+        Tensor a_cpp_exp = a_cpp.relu().exp();
+        Tensor a_cpp_sum = a_cpp_exp.sum();
+        Tensor c_cpp = (a_cpp_exp / a_cpp_sum).sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({-1.0, 2.0, -3.0, 4.0}, torch::requires_grad());
+        auto a_torch_exp = torch::nn::functional::relu(a_torch.exp());
+        a_torch_exp.retain_grad();
+        auto a_torch_sum = a_torch_exp.sum();
+        a_torch_sum.retain_grad();
+        auto c_torch = (a_torch_exp / a_torch_sum).sum();
+        c_torch.backward();
+        
+        compare_tensors(c_cpp.data, c_torch, "Relu Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Relu Gradient (a)");
+    }
  
 }
 

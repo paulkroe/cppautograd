@@ -119,10 +119,14 @@ public:
     Tensor mean() const;
     /* exp tensor */
     Tensor exp() const;
+    /* log tensor */
+    Tensor log() const;
     /* softmax over dimension */
     Tensor softmax(size_t dim) const;
     /* softmax */
     Tensor softmax() const;
+    /* one hot-encode */
+    Tensor onehot_encode(size_t num_classes) const;
 
 private:
     // unravel_index: given a linear index `idx` and a shape vector, produce
@@ -197,6 +201,10 @@ static std::vector<float> reduce_grad(const std::vector<float>& grad,
     const std::vector<size_t>& grad_shape, 
     const std::vector<size_t>& original_shape);
 
+
+
 };
+
+Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true);
 
 #endif // CPPGRAD_H

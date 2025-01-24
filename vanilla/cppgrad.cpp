@@ -4,7 +4,10 @@
 #include <cmath>
 #include <stack>
 #include <unordered_set>
-
+int id_counter = 0;
+int get_id() {
+    return id_counter++;
+}
 /* 
  * backward function for scalar tensors:
  * 1. Check if the tensor is scalar
@@ -12,51 +15,43 @@
  * 3. Initialize/Set the gradient to 1.0
  * 4. Call the backward function if tensor has a backward function
  */
+
 void Tensor::backward() {
-    // Check if the tensor is a scalar (single value output)
     if (this->numel(shape) != 1) {
         throw std::runtime_error("Backward only supported for scalar outputs");
     }
-
-    // Check if this tensor requires gradient computation
     if (!requires_grad) {
         throw std::runtime_error("This tensor does not require gradient");
     }
 
-    // Initialize gradient as 1.0 if it's missing (gradient of loss w.r.t. itself)
+    // Initialize gradient as 1.0 if missing
     if (!grad) {
         grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 1.0f), shape, false);
     } else {
         std::fill(grad->data.begin(), grad->data.end(), 1.0f);
     }
 
-    // Stack for iterative backpropagation (avoiding recursion)
+    // Step 1: Use raw pointers for tracking visited tensors
+    std::unordered_set<Tensor*> visited;  // Now stores raw pointers
+    std::unordered_set<int> visited_id;
     std::stack<Tensor*> stack;
-    std::unordered_set<Tensor*> visited;  // To track executed nodes
-    std::unordered_map<Tensor*, std::vector<float>> accumulated_grads;
-
     stack.push(this);
 
     while (!stack.empty()) {
         Tensor* current = stack.top();
         stack.pop();
 
-        // Skip if already processed
+        // Skip processing if already visited
         if (visited.count(current)) continue;
-        visited.insert(current);
+        if (visited_id.count(current->id)) continue;
+        visited.insert(current);  // Track the raw pointer
+        visited_id.insert(current->id);
 
-        // Ensure it has a gradient storage
+        // Ensure it has gradient storage
         if (!current->grad) {
             current->grad = std::make_shared<Tensor>(
                 std::vector<float>(current->data.size(), 0.0f), current->shape, false
             );
-        }
-
-        // Accumulate gradients from child nodes
-        if (accumulated_grads.count(current)) {
-            for (size_t i = 0; i < current->grad->data.size(); i++) {
-                current->grad->data[i] += accumulated_grads[current][i];
-            }
         }
 
         // Execute the backward function if it exists
@@ -64,12 +59,13 @@ void Tensor::backward() {
             current->backward_fn();
         }
 
-        // Push parent nodes onto the stack (ensuring they execute later)
+        // Push parent nodes onto the stack, using raw pointers
         for (const auto& parent : current->parents) {
-            stack.push(parent.get());
+            stack.push(parent.get());  // Get the raw pointer from shared_ptr
         }
     }
 }
+
 
 /* 
  * Helper function to infer broadcast shape 
@@ -128,7 +124,6 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
         /* Construct result tensor */
         std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, shape, requires_grad || other.requires_grad);
-
         /* Construct backward function */
         if (result->requires_grad) {
             /* 
@@ -1213,7 +1208,6 @@ Tensor Tensor::sum(size_t dim) const {
     // 5. Create the reduced tensor
     //
     std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, new_shape, requires_grad);
-
     //
     // 6. Set up backward function
     //
@@ -1436,7 +1430,6 @@ Tensor Tensor::mean() const {
 }
 
 Tensor Tensor::exp() const{
-    // std::cout << "Exp" << std::endl;
     // 1) Compute exp elementwise
     std::vector<float> forward_data(data.size());
     for (size_t i = 0; i < data.size(); i++) {
@@ -1445,7 +1438,7 @@ Tensor Tensor::exp() const{
 
     // 2) Create the output tensor
     std::shared_ptr<Tensor> result = std::make_shared<Tensor>(forward_data, shape, requires_grad);
-
+    
     // 3) If we need gradients, set up the backward function
     if (result->requires_grad) {
         // Capture only what's needed in the lambda
@@ -1459,13 +1452,12 @@ Tensor Tensor::exp() const{
         if (this_requires_grad)
             result->parents.push_back(std::make_shared<Tensor>(*this));
 
+
         result->backward_fn = [=]() mutable {
-            // std::cout << "Backward for exp" << std::endl;
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
                     // out_data[i] is exp(this_data[i])
                     this_grad->data[i] += result_grad->data[i] * out_data[i];
-                    // std::cout << result_grad->data[i] * out_data[i] << std::endl;
                 }
             }
         };

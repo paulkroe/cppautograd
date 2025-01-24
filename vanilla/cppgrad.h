@@ -7,8 +7,12 @@
 #include <stdexcept>
 #include <iostream>
 
-class Tensor {
+int get_id();
+
+// class Tensor {
+class Tensor : public std::enable_shared_from_this<Tensor> {
 public:
+    int id = -1;
     std::vector<float> data;
     std::vector<size_t> shape;
     bool requires_grad;
@@ -25,6 +29,7 @@ public:
             grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), false);
             grad->shape = shape;
         }
+        id = get_id();
     }
 
     // Constructor with explicit shape
@@ -36,6 +41,7 @@ public:
         if (requires_grad) {
             grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), shape, false);
         }
+        id = get_id();
     }
 
     // Constructor with explicit shape and gradient
@@ -45,6 +51,7 @@ public:
             this->grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), false);
             this->grad->shape = shape;
         }
+        id = get_id();
     }
 
     // Overload the << operator
@@ -206,5 +213,4 @@ static std::vector<float> reduce_grad(const std::vector<float>& grad,
 };
 
 Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true);
-
 #endif // CPPGRAD_H

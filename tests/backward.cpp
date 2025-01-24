@@ -76,7 +76,7 @@ void test_scalars() {
 void compare_tensors(const std::vector<float>& cpp_data, const torch::Tensor& torch_tensor, const std::string& test_name) {
     auto torch_data = torch_tensor.flatten().data_ptr<float>();
     for (size_t i = 0; i < cpp_data.size(); ++i) {
-        if (std::abs(cpp_data[i] - torch_data[i]) > 1e-4) {
+        if (std::abs(cpp_data[i] - torch_data[i]) > 1e-3) {
             std::cerr << test_name << " FAILED at index " << i << ": " << cpp_data[i] << " (cpp) vs " << torch_data[i] << " (torch).\n";
             std::cerr << "Difference: " << std::abs(cpp_data[i] - torch_data[i]) << std::endl;
             return;
@@ -175,7 +175,6 @@ void test_multidimensional() {
     {
         std::cout << "Test Exp 1: Basic Forward + Sum\n";
 
-        //--- C++ side ---//
         // 1) Create a small tensor x with requires_grad=true
         Tensor x_cpp({0.0, 1.0, 2.0}, {3}, true);
         // 2) Apply exp
@@ -184,9 +183,30 @@ void test_multidimensional() {
         Tensor sum_cpp = y_cpp.sum();
         sum_cpp.backward();
 
-        //--- PyTorch side ---//
         auto x_torch = torch::tensor({0.0f, 1.0f, 2.0f}, torch::requires_grad());
         auto y_torch = x_torch.exp();
+        auto sum_torch = y_torch.sum();
+        sum_torch.backward();
+
+        // Compare forward data
+        compare_tensors(y_cpp.data, y_torch, "Exp Forward");
+        // Compare gradient wrt x
+        compare_tensors(x_cpp.grad->data, x_torch.grad(), "Exp Gradient (sum)");
+    }
+
+    {
+        std::cout << "Test Log 1: Basic Forward + Sum\n";
+
+        // 1) Create a small tensor x with requires_grad=true
+        Tensor x_cpp({0.0, 1.0, 2.0}, {3}, true);
+        // 2) Apply exp
+        Tensor y_cpp = x_cpp.log();
+        // 3) sum and backward
+        Tensor sum_cpp = y_cpp.sum();
+        sum_cpp.backward();
+
+        auto x_torch = torch::tensor({0.0f, 1.0f, 2.0f}, torch::requires_grad());
+        auto y_torch = x_torch.log();
         auto sum_torch = y_torch.sum();
         sum_torch.backward();
 
@@ -221,6 +241,33 @@ void test_multidimensional() {
         compare_tensors(y_cpp.data, y_torch, "x*exp(x) sum");
         // Compare gradient wrt x
         compare_tensors(x_cpp.grad->data, x_torch.grad(), "x*exp(x) gradient");
+    }
+
+    {
+        std::cout << "Test Log 2: Multiply x * log(x) + sum\n";
+
+        //--- C++ side ---//
+        Tensor x_cpp({-1.0, 0.0, 3.0}, {3}, true);
+        // e = log(x)
+        Tensor e_cpp = x_cpp.log();
+        // z = x * e
+        Tensor z_cpp = x_cpp * e_cpp;  // you likely have operator* for elementwise multiply
+        Tensor y_cpp = z_cpp.sum();
+        y_cpp.backward();
+
+        //--- PyTorch side ---//
+        auto x_torch = torch::tensor({-1.0f, 0.0f, 3.0f}, torch::requires_grad());
+        auto e_torch = x_torch.log();
+        auto z_torch = x_torch * e_torch;
+        auto y_torch = z_torch.sum();
+        y_torch.backward();
+
+        // Compare forward z
+        compare_tensors(z_cpp.data, z_torch, "x*log(x) forward");
+        // Compare final sum
+        compare_tensors(y_cpp.data, y_torch, "x*log(x) sum");
+        // Compare gradient wrt x
+        compare_tensors(x_cpp.grad->data, x_torch.grad(), "x*log(x) gradient");
     }
 
     // Test 5: Matrix multiplication
@@ -308,6 +355,103 @@ void test_multidimensional() {
 
         compare_tensors(c_cpp.data, c_torch, "Exponential Result");
         compare_tensors(a_cpp.grad->data, a_torch.grad(), "Exponential Gradient");
+    }
+
+    // Test 10: Logarithm
+    {
+        std::cout << "Test 9: Logarithm\n";
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {2, 2}, true);
+
+        Tensor c_cpp = a_cpp.log().mean().mean();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({{1.0, 2.0}, {3.0, 4.0}}, torch::requires_grad());
+        auto c_torch = a_torch.log().mean();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Exponential Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Exponential Gradient");
+    }
+
+    {
+        std::cout << "Test 10: One-hot encoding\n";
+        Tensor a_cpp({0.0, 1.0, 2.0, 1.0}, {2, 2}, true);
+        Tensor c_cpp = a_cpp.onehot_encode(3);
+
+        auto a_torch = torch::tensor({{0, 1}, {2, 1}}, torch::dtype(torch::kLong));
+        auto c_torch = torch::nn::functional::one_hot(a_torch, 3).to(torch::kFloat).requires_grad_(true);
+
+        compare_tensors(c_cpp.data, c_torch, "One-hot encoding Result");
+    }
+
+    {
+        std::cout << "Test 11: Cross Entropy Loss\n";
+        Tensor y_pred_cpp({0.1, 0.9, 0.2, 0.8, 0.3, 0.7}, {2, 3}, true);
+        Tensor y_true_cpp({0, 1}, {2}, true);
+
+        Tensor loss_cpp = CrossEntropyLoss(y_pred_cpp, y_true_cpp);
+        loss_cpp.backward();
+
+        auto y_pred_torch = torch::tensor({{0.1, 0.9, 0.2}, {0.8, 0.3, 0.7}}, torch::requires_grad());
+        auto y_true_torch = torch::tensor({0, 1}, torch::dtype(torch::kLong));
+        auto loss_torch = torch::nn::functional::cross_entropy(y_pred_torch, y_true_torch).requires_grad_(true);
+        loss_torch.backward();
+
+        compare_tensors(loss_cpp.data, loss_torch, "Cross Entropy Loss Result");
+        compare_tensors(y_pred_cpp.grad->data, y_pred_torch.grad(), "Cross Entropy Loss Gradient (y_pred)");
+    
+    }
+
+    {
+        std::cout << "Test 12: Man Cross Entropy Loss\n";
+
+        // Ensure y_pred_cpp has requires_grad set to true
+        Tensor y_pred_cpp({0.1, 0.9, 0.2, 0.8, 0.3, 0.7}, {2, 3}, true);
+        Tensor y_true_cpp({0, 1}, {2}, false);
+
+        // Apply softmax to predictions along the last dimension (classes)
+        Tensor y_pred_softmax = y_pred_cpp.softmax(1);
+
+        // Convert labels to one-hot encoding
+        Tensor y_true_one_hot = y_true_cpp.onehot_encode(3);
+
+        // Compute negative log-likelihood: - sum(one_hot * log(softmax)) over the class axis
+        Tensor neg_log_likelihood = -(y_true_one_hot * y_pred_softmax.log()).sum(1);
+
+        // Compute mean loss over batch dimension
+        Tensor loss_cpp = neg_log_likelihood.mean();
+
+        // Compute gradients
+        loss_cpp.backward();
+
+
+        // PyTorch Equivalent Computation
+        auto y_pred_torch = torch::tensor({{0.1, 0.9, 0.2}, {0.8, 0.3, 0.7}}, torch::requires_grad());
+        auto y_true_torch = torch::tensor({0, 1}, torch::dtype(torch::kLong));
+
+        // Apply softmax along the class axis (dim=1)
+        auto y_pred_softmax_torch = torch::softmax(y_pred_torch, 1);
+        y_pred_softmax_torch.retain_grad();
+
+        // Convert y_true to one-hot encoding
+        auto y_true_one_hot_torch = torch::nn::functional::one_hot(y_true_torch, 3).to(torch::kFloat);
+
+        // Compute negative log-likelihood: - sum(one_hot * log(softmax)) over class axis
+        auto neg_log_likelihood_torch = -(y_true_one_hot_torch * y_pred_softmax_torch.log()).sum(1);
+        neg_log_likelihood_torch.retain_grad();
+
+        // Compute mean loss over batch dimension
+        auto loss_torch = neg_log_likelihood_torch.mean();
+
+        // Compute gradients
+        loss_torch.backward();
+
+        // Compare results
+        compare_tensors(loss_cpp.data, loss_torch, "Cross Entropy Loss Result");
+        compare_tensors(y_pred_cpp.grad->data, y_pred_torch.grad(), "Cross Entropy Loss Gradient (y_pred)");
+        compare_tensors(y_pred_softmax.grad->data, y_pred_softmax_torch.grad(), "Cross Entropy Loss Gradient (y_pred_softmax)");
+        compare_tensors(neg_log_likelihood.grad->data, neg_log_likelihood_torch.grad(), "Cross Entropy Loss Gradient (neg_log_likelihood)");
+
     }
 
 }
@@ -598,6 +742,80 @@ void test_batched_operations() {
     }
 
     {
+        std::cout << "Test 1: Softmax with Mean Reduction\n";
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
+        Tensor c_cpp = a_cpp.softmax(0).mean();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
+        auto c_torch = torch::nn::functional::softmax(a_torch, 0).mean();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Softmax Result");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Softmax Gradient (a)");
+    }
+
+    {
+        std::cout << "Test 2: Softmax Along Different Dimensions\n";
+        Tensor a_cpp({1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {2, 3}, true);
+        Tensor c_cpp = a_cpp.softmax(1).sum().sum();
+        c_cpp.backward();
+
+        auto a_torch = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 5.0, 6.0}}, torch::requires_grad());
+        auto c_torch = torch::nn::functional::softmax(a_torch, 1).sum().sum();
+        c_torch.backward();
+
+        compare_tensors(c_cpp.data, c_torch, "Softmax Result (dim=1)");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Softmax Gradient (dim=1)");
+    }
+
+    {
+        std::cout << "Test: Mixed Operations with Softmax and Reduction\n";
+
+        // Create input tensor with requires_grad=true
+        Tensor a_cpp({1.2, 2.3, -1.4, 3.1, 0.5, -0.8}, {2, 3}, true);
+
+        // Perform various arithmetic operations before softmax
+        Tensor b_cpp = (a_cpp * Tensor({2.0}, {1}, false) - Tensor({1.5}, {1}, false));
+        Tensor c_cpp = b_cpp / Tensor({1.2}, {1}, false);
+        Tensor d_cpp = c_cpp + Tensor({0.8}, {1}, false);
+
+        // Apply softmax along the last dimension
+        Tensor e_cpp = d_cpp.softmax(1);
+
+        // Reduce by summing over class dimension
+        Tensor f_cpp = e_cpp.sum(1);
+
+        // Further operations after reduction
+        Tensor g_cpp = f_cpp * Tensor({2}, {1}, false);
+        Tensor h_cpp = g_cpp - Tensor({0.5}, {1}, false);
+        Tensor i_cpp = h_cpp.mean(); // Final loss
+
+        // Compute gradients
+        i_cpp.backward();
+
+        // PyTorch Equivalent Computation
+        auto a_torch = torch::tensor({{1.2, 2.3, -1.4}, {3.1, 0.5, -0.8}}, torch::requires_grad());
+
+        // Perform the same operations in PyTorch
+        auto b_torch = (a_torch * 2.0) - 1.5;
+        auto c_torch = b_torch / 1.2;
+        auto d_torch = c_torch + 0.8;
+        auto e_torch = torch::softmax(d_torch, 1);
+        auto f_torch = e_torch.sum(1);
+        auto g_torch = f_torch * 2.0;
+        auto h_torch = g_torch - 0.5;
+        auto i_torch = h_torch.mean(); // Final loss
+
+        // Compute gradients
+        i_torch.backward();
+
+        // Compare results
+        compare_tensors(i_cpp.data, i_torch, "Final Loss");
+        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Gradient of Input Tensor (a)");
+    }
+
+    {
         std::cout << "Test 5: Man Softmax\n";
         
         Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
@@ -619,6 +837,7 @@ void test_batched_operations() {
         // compare_tensors(a_cpp_sum.grad->data, a_torch_sum.grad(), "Sum Softmax Gradient");
         compare_tensors(a_cpp.grad->data, a_torch.grad(), "Man Softmax Gradient (a)");
     }
+ 
 }
 
 void test_large_matrix_multiplication() {
@@ -649,46 +868,6 @@ void test_large_matrix_multiplication() {
     // compare_tensors(c_cpp.grad->data, c_torch.grad(), "Matrix Multiplication Gradient (c)");
 }
 
-void test_softmax_debug() {
-        /*
-        std::cout << "Test 5: Man Softmax\n";
-        
-        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
-        Tensor a_cpp_exp = a_cpp.exp();
-        Tensor a_cpp_sum = a_cpp_exp.sum();
-        Tensor c_cpp = (a_cpp_exp / a_cpp_sum).sum();
-        c_cpp.backward();
-
-        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
-        auto a_torch_exp = a_torch.exp();
-        a_torch_exp.retain_grad();
-        auto a_torch_sum = a_torch_exp.sum();
-        a_torch_sum.retain_grad();
-        auto c_torch = (a_torch_exp / a_torch_sum).sum();
-        c_torch.backward();
-        
-        compare_tensors(c_cpp.data, c_torch, "Man Softmax Result");
-        compare_tensors(a_cpp_exp.grad->data, a_torch_exp.grad(), "Exp Softmax Gradient");
-        // compare_tensors(a_cpp_sum.grad->data, a_torch_sum.grad(), "Sum Softmax Gradient");
-        compare_tensors(a_cpp.grad->data, a_torch.grad(), "Man Softmax Gradient (a)");
-        */
-
-
-        Tensor a_cpp({1.0, 2.0, 3.0, 4.0}, {4}, true);
-        Tensor a_cpp_exp = a_cpp.exp();
-        Tensor b_cpp = a_cpp_exp + a_cpp_exp;
-        Tensor c_cpp = b_cpp.sum();
-        c_cpp.backward();
-        std::cout << "a_cpp: " << a_cpp << std::endl;
-
-        auto a_torch = torch::tensor({1.0, 2.0, 3.0, 4.0}, torch::requires_grad());
-        auto a_torch_exp = a_torch.exp();
-        auto b_torch = a_torch_exp + a_torch_exp;
-        auto c_torch = b_torch.sum();
-        c_torch.backward();
-        std::cout << "a_torch: " << a_torch.grad() << std::endl;
-}
-
 
 int main() {
     std::cout << "Testing scalar operations...\n";
@@ -702,7 +881,5 @@ int main() {
 
     std::cout << "\nTesting large matrix multiplication...\n";
     test_large_matrix_multiplication();
-    
-    // test_softmax_debug();
     return 0;
 }

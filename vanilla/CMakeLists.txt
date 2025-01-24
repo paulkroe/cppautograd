@@ -39,6 +39,11 @@ add_executable(linear_test ../../tests/linear.cpp)
 target_link_libraries(linear_test PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(linear_test PRIVATE ${TORCH_INCLUDE_DIRS})
 
+# Add the test executable for digit classification
+add_executable(digit_classification ../../tests/digit_classification.cpp)
+target_link_libraries(digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
+target_include_directories(digit_classification PRIVATE ${TORCH_INCLUDE_DIRS})
+
 # Set flags for LibTorch (optional)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 

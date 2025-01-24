@@ -1574,6 +1574,41 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
 
 }
 
+Tensor Tensor::relu() const{
+    // 1) Compute exp elementwise
+    std::vector<float> forward_data(data.size());
+    for (size_t i = 0; i < data.size(); i++) {
+        forward_data[i] = data[i] > 0 ? data[i] : 0;
+    }
+
+    // 2) Create the output tensor
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(forward_data, shape, requires_grad);
+
+    // 3) If we need gradients, set up the backward function
+    if (result->requires_grad) {
+        // Capture only what's needed in the lambda
+        auto this_requires_grad = this->requires_grad;
+        auto this_grad    = this->grad;   // Gradient buffer of the input
+        auto this_data    = this->data;   // For completeness, if needed
+        auto out_data     = result->data; 
+        auto result_grad  = result->grad;
+        auto this_backward_fn = this->backward_fn;
+
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+
+        result->backward_fn = [=]() mutable {
+            if (this_requires_grad && this_grad) {
+                for (size_t i = 0; i < this_data.size(); i++) {
+                    this_grad->data[i] += result_grad->data[i] * (this_data[i] > 0 ? 1 : 0);
+                }
+            }
+        };
+    }
+
+    return *result;
+}
+
 Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true) {
     // 1) Compute the softmax of y_pred along the last dimension (class axis)
     Tensor y_pred_softmax = y_pred.softmax(y_pred.shape.size() - 1);  

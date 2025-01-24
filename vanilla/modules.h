@@ -9,8 +9,9 @@ class Linear {
         Tensor bias;
 
         Linear(size_t in_features, size_t out_features)
-            : weight(Tensor::randn({in_features, out_features}, true)),
-              bias(Tensor::randn({out_features}, true)) {}
+            : weight(Tensor::randn_he(in_features, out_features, true)),
+            bias(Tensor::bias_uniform(out_features, true)) {}
+
 
         Tensor forward(Tensor x) {
             return x.matmul(weight) + bias;

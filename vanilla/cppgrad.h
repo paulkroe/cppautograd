@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <iostream>
+#include <cmath>
 
 int get_id();
 
@@ -104,6 +105,25 @@ public:
         return Tensor(data, shape, requires_grad);
     }
 
+    static Tensor randn_he(size_t in_features, size_t out_features, bool requires_grad = false) {
+        float stddev = std::sqrt(2.0f / in_features);
+        std::vector<float> data(in_features * out_features);
+        for (size_t i = 0; i < data.size(); i++) {
+            data[i] = stddev * ((float)rand() / RAND_MAX * 2 - 1); // Uniform [-stddev, stddev]
+        }
+        return Tensor(data, {in_features, out_features}, requires_grad);
+    }
+
+    static Tensor bias_uniform(size_t in_features, bool requires_grad = false) {
+        float bound = 1.0f / std::sqrt(in_features);  // PyTorch-style bias init
+        std::vector<float> data(in_features);
+        for (size_t i = 0; i < data.size(); i++) {
+            data[i] = ((float)rand() / RAND_MAX * 2 - 1) * bound;  // Uniform[-bound, bound]
+        }
+        return Tensor(data, {in_features}, requires_grad);
+    }
+
+
     void backward();
 
     /* binary addition operator */
@@ -134,6 +154,9 @@ public:
     Tensor softmax() const;
     /* one hot-encode */
     Tensor onehot_encode(size_t num_classes) const;
+
+    /* activation function */
+    Tensor relu() const;
 
 private:
     // unravel_index: given a linear index `idx` and a shape vector, produce

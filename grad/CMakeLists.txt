@@ -25,6 +25,16 @@ endif()
 target_link_libraries(cppgrad PRIVATE "${TORCH_LIBRARIES}")
 target_include_directories(cppgrad PRIVATE ${TORCH_INCLUDE_DIRS})
 
+# Add unit tests executable
+find_package(GTest REQUIRED)
+add_executable(unit_tests ../../tests/unit_tests.cpp
+                         ../../tests/test_functions/scalar_test.cpp
+                         ../../tests/test_functions/reduction_test.cpp
+                         ../../tests/test_functions/multidim_test.cpp)
+target_link_libraries(unit_tests PRIVATE GTest::GTest GTest::Main cppgrad "${TORCH_LIBRARIES}")
+target_include_directories(unit_tests PRIVATE ${TORCH_INCLUDE_DIRS})
+
+
 # Add the test executable for backward.cpp
 add_executable(backward_test ../../tests/backward.cpp)
 target_link_libraries(backward_test PRIVATE cppgrad "${TORCH_LIBRARIES}")

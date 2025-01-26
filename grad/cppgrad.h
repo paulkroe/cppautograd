@@ -154,8 +154,6 @@ public:
         return product;
     }
  
-    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
-
     static std::vector<float> reduce_grad(const std::vector<float>& grad, 
         const std::vector<size_t>& grad_shape, 
         const std::vector<size_t>& original_shape);
@@ -193,10 +191,6 @@ std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vect
 
 void printShape(const std::vector<size_t>& shape);
 void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2);
-
-std::vector<float> reduce_broadcasted_grad(const std::vector<float>& grad, 
-                            const std::vector<size_t>& grad_shape, 
-                            const std::vector<size_t>& original_shape);
 
 size_t map_index(const std::vector<size_t>& multi_index,
                         const std::vector<size_t>& shape); 

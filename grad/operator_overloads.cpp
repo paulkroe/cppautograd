@@ -70,7 +70,7 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
             /* 1) Gradient w.r.t. x (this->data) */
             if (this_requires_grad && this_grad) {
-                auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, this_shape);
+                auto reduced_grad = reduce_grad(result_grad->data, result_shape, this_shape);
                 for (size_t i = 0; i < reduced_grad.size(); ++i) {
                     this_grad->data[i] += reduced_grad[i];
                 }
@@ -78,7 +78,7 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
             /* 2) Gradient w.r.t. y (other->data) */
             if (other_requires_grad && other_grad) {
-                auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, other_shape);
+                auto reduced_grad = reduce_grad(result_grad->data, result_shape, other_shape);
                 for (size_t i = 0; i < reduced_grad.size(); ++i) {
                     other_grad->data[i] += reduced_grad[i];
                 }
@@ -122,6 +122,7 @@ Tensor Tensor::operator-() const {
         auto this_backward_fn = this->backward_fn;
         auto result_grad = result->grad;
 
+        /* insert result into the computation graph */
         if (this_requires_grad)
             result->parents.push_back(std::make_shared<Tensor>(*this));
 
@@ -241,7 +242,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
                 }
 
                 /* reduce the gradient by summing over broadcasted dimension */
-                auto reduced_grad_x = reduce_broadcasted_grad(partial_grad_x, result_shape, this_shape);
+                auto reduced_grad_x = reduce_grad(partial_grad_x, result_shape, this_shape);
                 
                 for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
                     this_grad->data[i] += reduced_grad_x[i];
@@ -265,7 +266,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
                 }
                 
                 /* reduce the gradient by summing over broadcasted dimension */
-                auto reduced_grad_y = reduce_broadcasted_grad(partial_grad_y, result_shape, other_shape);
+                auto reduced_grad_y = reduce_grad(partial_grad_y, result_shape, other_shape);
                 
                 for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
                     other_grad->data[i] += reduced_grad_y[i];
@@ -364,7 +365,7 @@ Tensor Tensor::operator/(const Tensor& other) const {
                 }
 
                 /* reduce the gradient by summing over broadcasted dimension */
-                auto reduced_grad_x = reduce_broadcasted_grad(partial_grad_x, result_shape, this_shape);
+                auto reduced_grad_x = reduce_grad(partial_grad_x, result_shape, this_shape);
                 
                 for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
                     this_grad->data[i] += reduced_grad_x[i];
@@ -388,7 +389,7 @@ Tensor Tensor::operator/(const Tensor& other) const {
                 }
 
                 /* reduce the gradient by summing over broadcasted dimension */
-                auto reduced_grad_y = reduce_broadcasted_grad(partial_grad_y, result_shape, other_shape);
+                auto reduced_grad_y = reduce_grad(partial_grad_y, result_shape, other_shape);
                 
                 for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
                     other_grad->data[i] += reduced_grad_y[i];
@@ -399,7 +400,6 @@ Tensor Tensor::operator/(const Tensor& other) const {
 
     return *result;
 }
-
 
 /* 
  * Helper function to the << operator

@@ -63,38 +63,23 @@ std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vect
 }
 
 /*
- * Lambda function to compute the gradient reduction for broadcasting
+ * helper function to compute the gradient reduction for broadcasting
  * Given the gradient of `result`, we adjust it to match the original shape
  * of the input tensors by summing over the broadcasted dimensions.
  */
-std::vector<float> reduce_broadcasted_grad(const std::vector<float>& grad, 
-                            const std::vector<size_t>& grad_shape, 
-                            const std::vector<size_t>& original_shape)
-{
-/* compute the number of elements in the original tensor */
-size_t original_numel = Tensor::numel(original_shape);
 
-std::vector<float> reduced_grad(original_numel, 0.0f);
+std::vector<float> Tensor::reduce_grad(const std::vector<float>& grad, 
+                               const std::vector<size_t>& grad_shape, 
+                               const std::vector<size_t>& original_shape) {
+    std::vector<float> reduced_grad(Tensor::numel(original_shape), 0.0f);
 
-/* iterate over result grad_data and perform addition */
-for (size_t i = 0; i < grad.size(); ++i) {
-
-    /* Compute the multi-dimensional index in the result shape */
-    std::vector<size_t> multi_index(grad_shape.size(), 0);
-    size_t temp = i;
-    for (int j = grad_shape.size() - 1; j >= 0; --j) {
-        multi_index[j] = temp % grad_shape[j];
-        temp /= grad_shape[j];
+    for (size_t i = 0; i < grad.size(); ++i) {
+        std::vector<size_t> multi_index = unravel_index(i, grad_shape);
+        size_t reduced_index = map_index(multi_index, original_shape);
+        reduced_grad[reduced_index] += grad[i];
     }
 
-    /* Map to indices in the original tensor */
-    size_t index = map_index(multi_index, original_shape);
-
-    /* Accumulate the gradient by summing over broadcasted axes */
-    reduced_grad[index] += grad[i];
-}
-
-return reduced_grad;
+    return reduced_grad;
 }
 
 std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape) {

@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include <vector>
 #include <unordered_map>
-#include "../vanilla/cppgrad.h"
-#include "../vanilla/modules.h"
+#include "../grad/cppgrad.h"
+#include "../grad/modules.h"
 
 class MNISTDataset : public torch::data::datasets::Dataset<MNISTDataset> {
     std::vector<torch::Tensor> images_;
@@ -85,9 +85,14 @@ int main() {
         int epoch = 0;
         
         // TRAINING LOOP
-        int num_epochs = 10;
+        int num_epochs = 1; // Set the number of epochs
+
+        // Compute the total number of batches in the DataLoader
+        int num_batches = std::distance(data_loader->begin(), data_loader->end());
 
         for (int epoch = 0; epoch < num_epochs; epoch++) {
+            int batch_idx = 0; // Track current batch number
+
             for (auto& batch : *data_loader) {
                 auto images = batch.data;  // Shape: [batch_size, 1, 28, 28]
                 auto labels = batch.target; // Shape: [batch_size]
@@ -127,8 +132,10 @@ int main() {
                 Tensor loss = CrossEntropyLoss(y_pred, y);
                 loss.backward();
 
-                // Print loss with epoch progress
-                std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] Loss: " << loss.data[0] << std::endl;
+                // Print loss with epoch and batch progress
+                std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
+                        << "Batch [" << (batch_idx + 1) << "/" << num_batches << "] "
+                        << "Loss: " << loss.data[0] << std::endl;
 
                 /* Update weights */
                 for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
@@ -141,6 +148,8 @@ int main() {
                     layer->weight.zero_grad();
                     layer->bias.zero_grad();
                 }
+
+                batch_idx++; // Increment batch counter
             }
         }
 

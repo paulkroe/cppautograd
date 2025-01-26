@@ -146,18 +146,22 @@ public:
     /* activation function */
     Tensor relu() const;
 
-private:
-    // unravel_index: given a linear index `idx` and a shape vector, produce
-    // the multi-dimensional coordinate, e.g. shape=[2,3,4], idx in [0..23] 
-    // => coord=[b,c,d].
-    static std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape) {
-        std::vector<size_t> coords(shape.size());
-        for (int i = (int)shape.size() - 1; i >= 0; --i) {
-            coords[i] = idx % shape[i];
-            idx /= shape[i];
+    static size_t numel(const std::vector<size_t>& shp) {
+        size_t product = 1;
+        for (auto s : shp) {
+            product *= s;
         }
-        return coords;
+        return product;
     }
+ 
+    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
+
+    static std::vector<float> reduce_grad(const std::vector<float>& grad, 
+        const std::vector<size_t>& grad_shape, 
+        const std::vector<size_t>& original_shape);
+
+private:
+    
 
     // ravel_index: given a multi-dimensional coordinate and a shape, flatten 
     // back to a single offset in row-major order.
@@ -167,15 +171,7 @@ private:
             idx = idx * shape[i] + coords[i];
         }
         return idx;
-    }
-
-    static size_t numel(const std::vector<size_t>& shp) {
-        size_t product = 1;
-        for (auto s : shp) {
-            product *= s;
-        }
-        return product;
-    }
+    } 
     
     static bool shapes_equal(const std::vector<size_t>& a, const std::vector<size_t>& b) {
         if (a.size() != b.size()) return false;
@@ -185,21 +181,10 @@ private:
         return true;
     }
 
-    static size_t map_index(const std::vector<size_t>& multi_index,
-                        const std::vector<size_t>& shape); 
-                        
-    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
-
-    static std::vector<float> reduce_grad(const std::vector<float>& grad, 
-        const std::vector<size_t>& grad_shape, 
-        const std::vector<size_t>& original_shape);
-
-
 
 };
 
 Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true);
-#endif // CPPGRAD_H
 
 
 /* Utility functions */
@@ -208,3 +193,16 @@ std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vect
 
 void printShape(const std::vector<size_t>& shape);
 void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2);
+
+std::vector<float> reduce_broadcasted_grad(const std::vector<float>& grad, 
+                            const std::vector<size_t>& grad_shape, 
+                            const std::vector<size_t>& original_shape);
+
+size_t map_index(const std::vector<size_t>& multi_index,
+                        const std::vector<size_t>& shape); 
+
+// unravel_index: given a linear index `idx` and a shape vector, produce
+// the multi-dimensional coordinate, e.g. shape=[2,3,4], idx in [0..23] 
+// => coord=[b,c,d].
+std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape);
+#endif // CPPGRAD_H

@@ -62,7 +62,7 @@ public:
 };
 
 int main() {
-    const std::string dataset_path = "../../tests/data/archive/mnist_train.csv";
+    const std::string dataset_path = "../../demo/data/archive/mnist_train.csv";
     
     // Define the model
     Linear linear1(784, 512);

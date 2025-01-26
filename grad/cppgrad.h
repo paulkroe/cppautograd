@@ -1,13 +1,15 @@
 #ifndef CPPGRAD_H
 #define CPPGRAD_H
 
-#include <random>
-#include <vector>
 #include <functional>
 #include <memory>
 #include <stdexcept>
 #include <iostream>
+#include <random>
 #include <cmath>
+#include <vector>
+#include <stack>
+#include <unordered_set>
 
 int get_id();
 /* Global random number generator */
@@ -58,31 +60,10 @@ public:
         }
         id = get_id();
     }
-
+    
+    void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const;
     // Overload the << operator
-    friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor) {
-        os << "Data: ";
-        for (float d : tensor.data) {
-            os << d << " ";
-        }
-        os << "\n";
-
-        os << "Shape: ";
-        for (size_t s : tensor.shape) {
-            os << s << " ";
-        }
-        os << "\n";
-
-        if (tensor.requires_grad && tensor.grad) {
-            os << "Gradient: ";
-            for (float g : tensor.grad->data) {
-                os << g << " ";
-            }
-            os << "\n";
-        }
-
-        return os;
-    }
+    friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor);
 
     /* print shape */
     void print_shape() const{
@@ -162,7 +143,6 @@ public:
     Tensor softmax() const;
     /* one hot-encode */
     Tensor onehot_encode(size_t num_classes) const;
-
     /* activation function */
     Tensor relu() const;
 
@@ -206,38 +186,13 @@ private:
     }
 
     static size_t map_index(const std::vector<size_t>& multi_index,
-                        const std::vector<size_t>& shape)
-    {
-        size_t linear_index = 0;
-        size_t stride = 1;
+                        const std::vector<size_t>& shape); 
+                        
+    static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
 
-        // Align dimensions: shape may be smaller than multi_index.
-        int offset = multi_index.size() - shape.size();
-
-        // Iterate over shape dimensions from right to left
-        for (int i = shape.size() - 1; i >= 0; --i) {
-            int multi_idx_pos = i + offset; // Adjust for dimension alignment
-
-            size_t broadcast_dim_index = multi_index[multi_idx_pos];  // Corresponding index in result shape
-            size_t dim_size = shape[i];  // Size of dimension in original tensor
-
-            // If broadcasting occurs along this dimension, always use index 0
-            size_t index_component = (dim_size == 1) ? 0 : broadcast_dim_index;
-
-            // Accumulate to compute the linear index
-            linear_index += index_component * stride;
-            stride *= dim_size;
-        }
-
-        return linear_index;
-    }
-
-
-static std::vector<size_t> unflatten_index(size_t flat_index, const std::vector<size_t>& shape);
-
-static std::vector<float> reduce_grad(const std::vector<float>& grad, 
-    const std::vector<size_t>& grad_shape, 
-    const std::vector<size_t>& original_shape);
+    static std::vector<float> reduce_grad(const std::vector<float>& grad, 
+        const std::vector<size_t>& grad_shape, 
+        const std::vector<size_t>& original_shape);
 
 
 
@@ -245,3 +200,11 @@ static std::vector<float> reduce_grad(const std::vector<float>& grad,
 
 Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true);
 #endif // CPPGRAD_H
+
+
+/* Utility functions */
+
+std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2);
+
+void printShape(const std::vector<size_t>& shape);
+void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2);

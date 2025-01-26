@@ -1,6 +1,7 @@
 #ifndef CPPGRAD_H
 #define CPPGRAD_H
 
+#include <random>
 #include <vector>
 #include <functional>
 #include <memory>
@@ -9,6 +10,9 @@
 #include <cmath>
 
 int get_id();
+/* Global random number generator */
+extern std::mt19937 global_generator;
+void set_seed(int seed);
 
 // class Tensor {
 class Tensor : public std::enable_shared_from_this<Tensor> {
@@ -99,9 +103,13 @@ public:
     static Tensor randn(const std::vector<size_t>& shape, bool requires_grad = false) {
         size_t total_elems = numel(shape);
         std::vector<float> data(total_elems);
+
+        // Use the global random generator
+        std::uniform_real_distribution<float> distribution(0.0, 1.0);
         for (size_t i = 0; i < total_elems; i++) {
-            data[i] = (float)rand() / RAND_MAX;
+            data[i] = distribution(global_generator);
         }
+
         return Tensor(data, shape, requires_grad);
     }
 

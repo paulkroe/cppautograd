@@ -8,6 +8,13 @@ int id_counter = 0;
 int get_id() {
     return id_counter++;
 }
+
+std::mt19937 global_generator(42);
+
+void set_seed(int seed) {
+    global_generator.seed(seed);
+}
+
 /* 
  * backward function for scalar tensors:
  * 1. Check if the tensor is scalar

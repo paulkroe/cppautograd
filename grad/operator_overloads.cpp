@@ -36,7 +36,7 @@ Tensor Tensor::operator+(const Tensor& other) const{
         size_t index_a = map_index(multi_index, this->shape);
         size_t index_b = map_index(multi_index, other.shape);
 
-        // Perform the addition
+        /* Perform the addition */
         result_data[i] = this->data[index_a] + other.data[index_b];
     }
 
@@ -72,27 +72,37 @@ Tensor Tensor::operator+(const Tensor& other) const{
                             result_grad, this_shape = this->shape, other_shape = other.shape,
                             result_shape = result->shape]() {
 
-            // Lambda to compute the reduction for broadcasting
+            /*
+             * Lambda function to compute the gradient reduction for broadcasting
+             * Given the gradient of `result`, we adjust it to match the original shape
+             * of the input tensors by summing over the broadcasted dimensions.
+             */
             auto reduce_broadcasted_grad = [](
                 const std::vector<float>& grad_data,
                 const std::vector<size_t>& grad_shape,
                 const std::vector<size_t>& original_shape
-            ) -> std::vector<float>
+            ) -> std::vector<float> 
             {
+                /* Compute the number of elements in the original tensor */
                 size_t original_numel = numel(original_shape);
+                
                 std::vector<float> reduced_grad(original_numel, 0.0f);
 
+                /* iterate over result grad_data and perform addition */
                 for (size_t i = 0; i < grad_data.size(); ++i) {
-                    // Convert linear index `i` into `multi_index` in `grad_shape`
+
+                    /* Compute the multi-dimensional index in the result shape */
                     std::vector<size_t> multi_index(grad_shape.size(), 0);
                     size_t temp = i;
                     for (int j = grad_shape.size() - 1; j >= 0; --j) {
                         multi_index[j] = temp % grad_shape[j];
                         temp /= grad_shape[j];
                     }
+
+                    /* Map to indices in the original tensor */
                     size_t index = map_index(multi_index, original_shape);
 
-                    // Accumulate the gradient correctly (sum over broadcasted axes)
+                    /* Accumulate the gradient by summing over broadcasted axes */
                     reduced_grad[index] += grad_data[i];
                 }
 
@@ -100,9 +110,9 @@ Tensor Tensor::operator+(const Tensor& other) const{
             };
 
 
-            auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, this_shape);
             // Backpropagate gradient for the first tensor
             if (this_requires_grad && this_grad) {
+                auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, this_shape);
                 for (size_t i = 0; i < reduced_grad.size(); ++i) {
                     this_grad->data[i] += reduced_grad[i];
                 }
@@ -110,6 +120,7 @@ Tensor Tensor::operator+(const Tensor& other) const{
 
             // Backpropagate gradient for the second tensor
             if (other_requires_grad && other_grad) {
+                auto reduced_grad = reduce_broadcasted_grad(result_grad->data, result_shape, other_shape);
                 for (size_t i = 0; i < reduced_grad.size(); ++i) {
                     other_grad->data[i] += reduced_grad[i];
                 }

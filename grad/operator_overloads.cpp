@@ -27,12 +27,7 @@ Tensor Tensor::operator+(const Tensor& other) const{
     for (size_t i = 0; i < result_size; ++i) {
 
         /* compute the multi-dimensional index in the result shape */
-        std::vector<size_t> multi_index(result_shape.size(), 0);
-        size_t temp = i;
-        for (int j = result_shape.size() - 1; j >= 0; --j) {
-            multi_index[j] = temp % result_shape[j];
-            temp /= result_shape[j];
-        }
+        std::vector<size_t> multi_index = unravel_index(i, result_shape);
 
         /* map to indices in the original tensors */
         size_t index_a = map_index(multi_index, this->shape);
@@ -181,16 +176,11 @@ Tensor Tensor::operator*(const Tensor& other) const {
     size_t result_size = numel(result_shape);
     std::vector<float> result_data(result_size);
 
-    /* iterate over result data and perform addition */
+    /* iterate over result data and perform multiplication */
     for (size_t i = 0; i < result_size; ++i) {
         
         /* compute the multi-dimensional index in the result shape */
-        std::vector<size_t> multi_index(result_shape.size(), 0);
-        size_t temp = i;
-        for (int j = result_shape.size() - 1; j >= 0; --j) {
-            multi_index[j] = temp % result_shape[j];
-            temp /= result_shape[j];
-        }
+        std::vector<size_t> multi_index = unravel_index(i, result_shape);
 
         /* map to indices in the original tensors */
         size_t index_a = map_index(multi_index, this->shape);
@@ -280,16 +270,136 @@ Tensor Tensor::operator*(const Tensor& other) const {
                 for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
                     other_grad->data[i] += reduced_grad_y[i];
                 }
-
             }
-            
         };
-
-
     }
 
     return *result;
 }
+
+/* 
+ * Overloaded / operator, does support broadcasting
+ * 1. Check if tensors are broadcastable
+ * 2. iterate over result data
+ * 3. construct multi-dimensional index
+ * 4. perform division
+ * 4. If necessary, set up the backward function
+ */
+Tensor Tensor::operator/(const Tensor& other) const {
+    
+    /* infer result shape */
+    std::vector<size_t> result_shape;
+    result_shape = broadcast(this->shape, other.shape);
+    
+    if (result_shape.empty()) {
+        printShapes(this->shape, other.shape);
+        throw std::invalid_argument("Tensor shapes must be broadcastable for division.");
+    }
+            
+    /* allocate memory for result data */
+    size_t result_size = numel(result_shape);
+    std::vector<float> result_data(result_size);
+
+    /* iterate over result data and perform division */
+    for (size_t i = 0; i < result_size; ++i) {
+
+        /* compute the multi-dimensional index in the result shape */
+        std::vector<size_t> multi_index = unravel_index(i, result_shape);
+
+        /* map to indices in the original tensors */
+        size_t index_a = map_index(multi_index, this->shape);
+        size_t index_b = map_index(multi_index, other.shape);
+
+        /* Perform the division */
+        result_data[i] = this->data[index_a] / other.data[index_b];
+    }
+
+    /* allocate result tensor */
+    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
+
+    /* construct backward function */
+    if (result->requires_grad) {
+        /*
+         * copy data necessary for backward function
+         * to avoid dangling references
+         */
+        auto this_requires_grad = this->requires_grad;
+        auto other_requires_grad = other.requires_grad;
+        auto this_grad = this->grad;
+        auto other_grad = other.grad;
+        auto this_backward_fn = this->backward_fn;
+        auto other_backward_fn = other.backward_fn;
+        auto result_grad = result->grad;
+
+        /* insert result into the computation graph */
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+        if (other_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(other));
+
+        result->backward_fn = [this_requires_grad, other_requires_grad,
+                    this_grad, other_grad,
+                    this_backward_fn, other_backward_fn,
+                    result_grad, 
+                    this_data = this->data,
+                    other_data = other.data,
+                    this_shape = this->shape,
+                    other_shape = other.shape,
+                    result_shape = result->shape]() 
+        {
+            /* 1) Gradient w.r.t. x (this->data) */
+            if (this_requires_grad && this_grad)
+            {
+                /* temporary helper varibale to element wise gradient */
+                std::vector<float> partial_grad_x(result_grad->data.size(), 0.0f);
+
+                /* iterate over result data and compute gradient */
+                for (size_t i = 0; i < result_grad->data.size(); ++i) {
+                    /* compute the multi-dimensional index in the result shape */
+                    std::vector<size_t> multi_index = unravel_index(i, result_shape); 
+                    /* map index into other->data */
+                    size_t index_b = map_index(multi_index, other_shape);
+                    /* compute the gradient */
+                    partial_grad_x[i] = result_grad->data[i] / other_data[index_b];
+                }
+
+                /* reduce the gradient by summing over broadcasted dimension */
+                auto reduced_grad_x = reduce_broadcasted_grad(partial_grad_x, result_shape, this_shape);
+                
+                for (size_t i = 0; i < reduced_grad_x.size(); ++i) {
+                    this_grad->data[i] += reduced_grad_x[i];
+                }
+            } 
+
+            /* 2) Gradient w.r.t. y (other->data) */
+            if (other_requires_grad && other_grad) {
+                /* temporary helper varibale to element wise gradient */
+                std::vector<float> partial_grad_y(result_grad->data.size(), 0.0f);
+
+                /* iterate over result data and compute gradient */
+                for (size_t i = 0; i < result_grad->data.size(); i++) {
+                    /* compute the multi-dimensional index in the result shape */
+                    std::vector<size_t> multi_index = unravel_index(i, result_shape);
+                    /* map index into data */
+                    size_t index_a = map_index(multi_index, this_shape);
+                    size_t index_b = map_index(multi_index, other_shape);
+                    /* compute the gradient */
+                    partial_grad_y[i] = -result_grad->data[i] * this_data[index_a] / (other_data[index_b] * other_data[index_b]);
+                }
+
+                /* reduce the gradient by summing over broadcasted dimension */
+                auto reduced_grad_y = reduce_broadcasted_grad(partial_grad_y, result_shape, other_shape);
+                
+                for (size_t i = 0; i < reduced_grad_y.size(); ++i) {
+                    other_grad->data[i] += reduced_grad_y[i];
+                }
+            }
+        };
+    }
+
+    return *result;
+}
+
 
 /* 
  * Helper function to the << operator

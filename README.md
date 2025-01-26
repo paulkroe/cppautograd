@@ -8,9 +8,15 @@ For some examples please see `grad/demo/` or the Tutorial section below.
 
 
 ## Speedup
+two areas of speedup:
+1) do the matrix multiplication on multiple cores
+2) distributed training
+
 WIP: paralelization on multiple cores, adding a cuda kernel
 
 ## Usage
 
-## Testing
-
+## design choices
+make no diff when broadcasting
+tensors having ids
+should to backward with topological sorting i think

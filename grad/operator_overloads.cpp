@@ -130,10 +130,6 @@ Tensor Tensor::operator-() const {
                               this_requires_grad, this_grad,
                               this_backward_fn, result_grad]() {
             if (this_requires_grad && this_grad) {
-               /*
-                * If this tensor requires its gradient and
-                * the gradient vector exists, update its gradient 
-                */
                 for (size_t i = 0; i < sz; i++) {
                     this_grad->data[i] -= result_grad->data[i];
                 }

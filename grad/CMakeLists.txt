@@ -14,11 +14,13 @@ set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
 find_package(Torch REQUIRED)
 
 # Add the library
-add_library(cppgrad STATIC cppgrad.cpp
-                           operator_overloads.cpp
+add_library(cppgrad STATIC operator_overloads.cpp
                            backward.cpp
                            matmul.cpp
                            reduction_operators.cpp
+                           unary_operators.cpp
+                           loss_functions.cpp
+                           activation_functions.cpp
                            util.cpp)
 
 # Enable warnings for cppgrad

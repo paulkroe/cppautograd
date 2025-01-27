@@ -48,6 +48,12 @@ add_executable(digit_classification ../../demo/digit_classification.cpp)
 target_link_libraries(digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(digit_classification PRIVATE ${TORCH_INCLUDE_DIRS})
 
+# Add the tutorial executable
+add_executable(tutorial ../../demo/tutorial.cpp)
+target_link_libraries(tutorial PRIVATE cppgrad "${TORCH_LIBRARIES}")
+target_include_directories(tutorial PRIVATE ${TORCH_INCLUDE_DIRS})
+
+
 # Set flags for LibTorch (optional)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 

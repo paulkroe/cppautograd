@@ -74,14 +74,18 @@ public:
 
     /* binary addition operator */
     Tensor operator+(const Tensor& other) const;
+    Tensor operator+(const float other) const;
     /* binary minus operator */
     Tensor operator-(const Tensor& other) const;
+    Tensor operator-(const float other) const;
     /* unary minus operator */
     Tensor operator-() const;
     /* elementwise multiplication operator */
     Tensor operator*(const Tensor& other) const;
+    Tensor operator*(const float other) const;
     /* elementwise division operator */
     Tensor operator/(const Tensor& other) const;
+    Tensor operator/(const float other) const;
     /* overload the << operator */
     friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor);
     /* matrix multiplication */
@@ -136,9 +140,10 @@ public:
     /* helper function to print the shape of a tensor */
     void print_shape() const; 
     /* helper function to print a tensor */
-    void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const;
-  
-private:
+    void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const; 
+    /* helper function returning the gradient tensor */
+    Tensor get_grad() const;
+   private:
 };
 
 /* Loss functions: */
@@ -187,6 +192,6 @@ std::vector<float> reduce_grad(const std::vector<float>& grad,
 void printShape(const std::vector<size_t>& shape);
 /* hel[er function to print two tensor shapes */
 void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2);
-
+/* helper function printing the gradient */
 
 #endif // CPPGRAD_H

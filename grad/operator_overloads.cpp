@@ -90,6 +90,12 @@ Tensor Tensor::operator+(const Tensor& other) const{
     return *result;
 
 }
+/*
+ * Overloaded + operator, for adding scalar and tensor
+ */
+Tensor Tensor::operator+(const float other) const {
+    return *this + Tensor({other}, false);
+}
 
 /* 
  * Overloaded unary - operator
@@ -148,6 +154,12 @@ Tensor Tensor::operator-() const {
 Tensor Tensor::operator-(const Tensor& other) const{
     /* a - b =  a + (-b) */
     return *this + (-other);
+}
+/*
+ * Overloaded - operator, for subtracting scalar and tensor
+ */
+Tensor Tensor::operator-(const float other) const {
+    return *this - Tensor({other}, false);
 }
 
 /* 
@@ -274,6 +286,13 @@ Tensor Tensor::operator*(const Tensor& other) const {
     return *result;
 }
 
+/*
+ * Overloaded * operator, for multiplying scalar and tensor
+ */
+Tensor Tensor::operator*(const float other) const {
+    return *this * Tensor({other}, false);
+}
+
 /* 
  * Overloaded / operator, does support broadcasting
  * 1. Check if tensors are broadcastable
@@ -395,6 +414,13 @@ Tensor Tensor::operator/(const Tensor& other) const {
     }
 
     return *result;
+}
+
+/*
+ * Overloaded * operator, for multiplying scalar and tensor
+ */
+Tensor Tensor::operator/(const float other) const {
+    return *this / Tensor({other}, false);
 }
 
 /* 

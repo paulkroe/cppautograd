@@ -158,3 +158,13 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
     }
     std::cout << std::endl;
 }
+
+/*
+ * helper function returning the gradient tensor
+ */
+Tensor Tensor::get_grad() const{
+    if (!grad) {
+        throw std::runtime_error("Tensor has no gradient.");
+    }
+    return *(grad.get());
+}

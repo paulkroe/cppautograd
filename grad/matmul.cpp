@@ -77,8 +77,8 @@ Tensor Tensor::matmul(const Tensor &other) const {
             std::vector<size_t> batch_index = unravel_index(b, batch_shape);
 
             /* figure out which offsets inside A and B this corresponds to */
-            size_t A_offset = map_index(batch_index, this_batch_shape) * m * n;
-            size_t B_offset = map_index(batch_index, other_batch_shape) * n * p;
+            size_t A_offset = ravel_index(batch_index, this_batch_shape) * m * n;
+            size_t B_offset = ravel_index(batch_index, other_batch_shape) * n * p;
             size_t C_offset = b * (m * p);
 
             /* matrix multiplication for each batch */
@@ -152,13 +152,13 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             unravel_index(b, saved_batch_shape);
 
                         /* compute offset into A, used to index into dA */
-                        size_t A_offset = map_index(batch_idx,
+                        size_t A_offset = ravel_index(batch_idx,
                             std::vector<size_t>(saved_this_shape.begin(),
                                                 saved_this_shape.end()-2))
                                           * (mm * nn);
 
                         /* compute offset into B, used to index into B */
-                        size_t B_offset = map_index(batch_idx,
+                        size_t B_offset = ravel_index(batch_idx,
                             std::vector<size_t>(saved_other_shape.begin(),
                                                 saved_other_shape.end()-2))
                                           * (nn * pp);
@@ -189,13 +189,13 @@ Tensor Tensor::matmul(const Tensor &other) const {
                             unravel_index(b, saved_batch_shape);
 
                         /* compute offset into A, used to index into A */
-                        size_t A_offset = map_index(batch_idx,
+                        size_t A_offset = ravel_index(batch_idx,
                             std::vector<size_t>(saved_this_shape.begin(),
                                                 saved_this_shape.end()-2))
                                           * (mm * nn);
 
                         /* compute offset into B, used to index into dB */
-                        size_t B_offset = map_index(batch_idx,
+                        size_t B_offset = ravel_index(batch_idx,
                             std::vector<size_t>(saved_other_shape.begin(),
                                                 saved_other_shape.end()-2))
                                           * (nn * pp);

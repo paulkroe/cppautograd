@@ -30,8 +30,8 @@ Tensor Tensor::operator+(const Tensor& other) const{
         std::vector<size_t> multi_index = unravel_index(i, result_shape);
 
         /* map to indices in the original tensors */
-        size_t index_a = map_index(multi_index, this->shape);
-        size_t index_b = map_index(multi_index, other.shape);
+        size_t index_a = ravel_index(multi_index, this->shape);
+        size_t index_b = ravel_index(multi_index, other.shape);
 
         /* perform addition */
         result_data[i] = this->data[index_a] + other.data[index_b];
@@ -180,8 +180,8 @@ Tensor Tensor::operator*(const Tensor& other) const {
         std::vector<size_t> multi_index = unravel_index(i, result_shape);
 
         /* map to indices in the original tensors */
-        size_t index_a = map_index(multi_index, this->shape);
-        size_t index_b = map_index(multi_index, other.shape);
+        size_t index_a = ravel_index(multi_index, this->shape);
+        size_t index_b = ravel_index(multi_index, other.shape);
 
         /* perform addition */
         result_data[i] = this->data[index_a] * other.data[index_b];
@@ -232,7 +232,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
                     /* compute the multi-dimensional index in the result shape */
                     std::vector<size_t> multi_index = unravel_index(i, result_shape);
                     /* map index into other->data */
-                    size_t index_b = map_index(multi_index, other_shape);
+                    size_t index_b = ravel_index(multi_index, other_shape);
                     /* compute the gradient */
                     partial_grad_x[i] = result_grad->data[i] * other_data[index_b];
                 }
@@ -256,7 +256,7 @@ Tensor Tensor::operator*(const Tensor& other) const {
                     /* compute the multi-dimensional index in the result shape */
                     std::vector<size_t> multi_index = unravel_index(i, result_shape);
                     /* map index into this->data */
-                    size_t index_a = map_index(multi_index, this_shape);
+                    size_t index_a = ravel_index(multi_index, this_shape);
                     /* compute the gradient */
                     partial_grad_y[i] = result_grad->data[i] * this_data[index_a];
                 }
@@ -304,8 +304,8 @@ Tensor Tensor::operator/(const Tensor& other) const {
         std::vector<size_t> multi_index = unravel_index(i, result_shape);
 
         /* map to indices in the original tensors */
-        size_t index_a = map_index(multi_index, this->shape);
-        size_t index_b = map_index(multi_index, other.shape);
+        size_t index_a = ravel_index(multi_index, this->shape);
+        size_t index_b = ravel_index(multi_index, other.shape);
 
         /* Perform the division */
         result_data[i] = this->data[index_a] / other.data[index_b];
@@ -355,7 +355,7 @@ Tensor Tensor::operator/(const Tensor& other) const {
                     /* compute the multi-dimensional index in the result shape */
                     std::vector<size_t> multi_index = unravel_index(i, result_shape); 
                     /* map index into other->data */
-                    size_t index_b = map_index(multi_index, other_shape);
+                    size_t index_b = ravel_index(multi_index, other_shape);
                     /* compute the gradient */
                     partial_grad_x[i] = result_grad->data[i] / other_data[index_b];
                 }
@@ -378,8 +378,8 @@ Tensor Tensor::operator/(const Tensor& other) const {
                     /* compute the multi-dimensional index in the result shape */
                     std::vector<size_t> multi_index = unravel_index(i, result_shape);
                     /* map index into data */
-                    size_t index_a = map_index(multi_index, this_shape);
-                    size_t index_b = map_index(multi_index, other_shape);
+                    size_t index_a = ravel_index(multi_index, this_shape);
+                    size_t index_b = ravel_index(multi_index, other_shape);
                     /* compute the gradient */
                     partial_grad_y[i] = -result_grad->data[i] * this_data[index_a] / (other_data[index_b] * other_data[index_b]);
                 }

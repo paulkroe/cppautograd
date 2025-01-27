@@ -21,6 +21,7 @@ add_library(cppgrad STATIC operator_overloads.cpp
                            unary_operators.cpp
                            loss_functions.cpp
                            activation_functions.cpp
+                           initialization_functions.cpp
                            util.cpp)
 
 # Enable warnings for cppgrad

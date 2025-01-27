@@ -48,7 +48,7 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
         
         multi_index.push_back(data[i]);
         /* map index into result's shape */
-        size_t index = map_index(multi_index, result_shape);
+        size_t index = ravel_index(multi_index, result_shape);
 
         result_data[index] = 1.0f;
     }
@@ -87,7 +87,7 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
                     multi_index.push_back(0);
                     for (size_t j = 0; j < num_classes; ++j) {
                         multi_index[this_shape.size() - 1] = j;
-                        size_t index = map_index(multi_index, result_shape);
+                        size_t index = ravel_index(multi_index, result_shape);
                         this_grad->data[i] += result_grad->data[index];
                     }
                 }

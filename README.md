@@ -4,6 +4,26 @@ Its syntax aims to mirror LibTorch.
 
 For some examples please see `grad/demo/` or the Tutorial section below.
 
+## Speedup
+speedup using multiple cpus:
+two areas of speedup:
+1) do the matrix multiplication on multiple cores
+2) distributed training
+
+WIP: parallelization on multiple cores, adding a CUDA kernel
+
+plan of action:
+first make matmul more efficient than just the most naive implementation
+then make matmul backprop more efficient as well
+add support for multiple threads to backward
+(Strassen algorithm)
+
+then add multithreadding support to other operators as well (not sure if they are beneficial)
+
+then measure duration of training both with and without acceleration
+
+after doing that, split training into batches and experiement what is the fastest
+
 ## Tutorial
 
 This tutorial demonstrates how to use the autograd engine step by step.
@@ -74,13 +94,6 @@ std::cout << "Broadcasted multiplication: " << broadcasted << "\n";
 broadcasted.sum().sum().backward();
 std::cout << "Gradient of small: " << small.get_grad() << "\n";
 ```
-
-## Speedup
-two areas of speedup:
-1) do the matrix multiplication on multiple cores
-2) distributed training
-
-WIP: parallelization on multiple cores, adding a CUDA kernel
 
 ## Usage
 

@@ -1,5 +1,5 @@
 #include "cppgrad.h"
-size_t id_counter = 0;
+std::atomic<std::uint8_t> id_counter = 0;
 std::mt19937 global_generator(42);
 
 /* helper function to get tensor id*/

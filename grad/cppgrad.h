@@ -1,6 +1,8 @@
 #ifndef CPPGRAD_H
 #define CPPGRAD_H
 
+#include <atomic>
+#include <thread>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -12,7 +14,7 @@
 #include <unordered_set>
 
 /* global tensor id */
-extern size_t id_counter;
+extern std::atomic<std::uint8_t> id_counter;
 /* helper function to get tensor id*/
 size_t get_id();
 
@@ -89,7 +91,7 @@ public:
     /* overload the << operator */
     friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor);
     /* matrix multiplication */
-    Tensor matmul(const Tensor &other) const;
+    Tensor matmul(const Tensor &other, size_t num_threads = 1) const;
     /* sum over given dimension */
     Tensor sum(size_t dim) const;
     /* sum over trailing dimension */

@@ -1,4 +1,4 @@
 /.vscode
 /build
-/grad/build
+/cmake/build
 /demo/data

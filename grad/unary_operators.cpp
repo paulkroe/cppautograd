@@ -35,7 +35,10 @@ Tensor Tensor::log() const {
         result->backward_fn = [
             this_requires_grad, this_grad,
             this_data, out_data, result_grad
-        ]() {
+        ](const size_t num_threads) {
+            /* serial backward function, num_threads not used */
+            (void)num_threads;
+
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
                     this_grad->data[i] += result_grad->data[i] / this_data[i];
@@ -80,7 +83,11 @@ Tensor Tensor::exp() const{
             result->parents.push_back(std::make_shared<Tensor>(*this));
 
 
-        result->backward_fn = [=]() mutable {
+        result->backward_fn = [=](const size_t num_threads) mutable { 
+            
+            /* serial backward function, num_threads not used */
+            (void)num_threads;
+
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
                     this_grad->data[i] += result_grad->data[i] * out_data[i];

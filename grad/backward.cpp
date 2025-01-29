@@ -10,7 +10,7 @@
  *     c. if tensor has a backward function, execute it
  *     d. push parent nodes onto the stack
  */
-void Tensor::backward() {
+void Tensor::backward(const size_t num_threads) {
 
     /* check if target is a scalar */
     if (this->numel(shape) != 1) {
@@ -57,7 +57,7 @@ void Tensor::backward() {
 
         // Execute the backward function if it exists
         if (current->backward_fn) {
-            current->backward_fn();
+            current->backward_fn(num_threads);
         }
 
         /* push parent nodes onto the stack, using raw pointers */

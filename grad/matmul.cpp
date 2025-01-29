@@ -1,39 +1,50 @@
 #include "cppgrad.h"
 size_t TILE_SIZE = 32;
-
 /* tiled matrix multiplication */
 /* we are using row major order */
 /* for efficient memory access it makes more sense to process rows than columns */
-void matmul_tile_rows(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C,
-                      size_t m, size_t n, size_t p,
-                      size_t batch_size,
-                      const std::vector<size_t>& A_offsets, const std::vector<size_t>& B_offsets, const std::vector<size_t>& C_offsets,
-                      size_t start_row, size_t end_row) {
+void matmul_tile_rows_tiled(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C,
+                            size_t m, size_t n, size_t p,
+                            size_t batch_size,
+                            const std::vector<size_t>& A_offsets, const std::vector<size_t>& B_offsets, const std::vector<size_t>& C_offsets,
+                            size_t start_row, size_t end_row) {
 
     for (size_t b = 0; b < batch_size; ++b) {
         size_t A_offset = A_offsets[b];
         size_t B_offset = B_offsets[b];
         size_t C_offset = C_offsets[b];
 
-        for (size_t i = start_row; i < end_row; ++i) {
-            for (size_t j = 0; j < p; ++j) {
-                float sum = 0.0f;
-                for (size_t k = 0; k < n; ++k) {
-                    sum += A[A_offset + i * n + k] * B[B_offset + k * p + j];
+        for (size_t i = start_row; i < end_row; i += TILE_SIZE) {
+            size_t i_end = std::min(i + TILE_SIZE, end_row);
+
+            for (size_t j = 0; j < p; j += TILE_SIZE) {
+                size_t j_end = std::min(j + TILE_SIZE, p);
+
+                for (size_t k = 0; k < n; k += TILE_SIZE) {
+                    size_t k_end = std::min(k + TILE_SIZE, n);
+
+                    /* Compute small tiles */
+                    for (size_t ii = i; ii < i_end; ++ii) {
+                        for (size_t jj = j; jj < j_end; ++jj) {
+                            float sum = 0.0f;
+                            for (size_t kk = k; kk < k_end; ++kk) {
+                                sum += A[A_offset + ii * n + kk] * B[B_offset + kk * p + jj];
+                            }
+                            C[C_offset + ii * p + jj] += sum;
+                        }
+                    }
                 }
-                C[C_offset + i * p + j] = sum;
             }
         }
     }
 }
 
-void matmul_tile_row_parallel(const std::vector<float>& A, std::vector<size_t>A_shape,
-                              const std::vector<float>& B, std::vector<size_t>B_shape,
-                              std::vector<float>& C,
-                              const size_t batch_size, const std::vector<size_t>& batch_shape,
-                              const size_t m, const size_t n, const size_t p,
-                              const size_t num_threads = 1,
-                              const bool transpose = false) {
+void matmul_tile_row_parallel(const std::vector<float>& A, std::vector<size_t> A_shape,
+                                    const std::vector<float>& B, std::vector<size_t> B_shape,
+                                    std::vector<float>& C,
+                                    const size_t batch_size, const std::vector<size_t>& batch_shape,
+                                    const size_t m, const size_t n, const size_t p,
+                                    const size_t num_threads) {
 
     std::vector<size_t> A_offsets(batch_size, 0);
     std::vector<size_t> B_offsets(batch_size, 0);
@@ -55,10 +66,10 @@ void matmul_tile_row_parallel(const std::vector<float>& A, std::vector<size_t>A_
     for (size_t t = 0; t < num_threads; ++t) {
         /* Spread remainder across first threads */
         size_t end = start + rows_per_thread + (t < remainder ? 1 : 0);
-        workers.emplace_back(matmul_tile_rows, std::cref(A), std::cref(B), std::ref(C),
-                        m, n, p,
-                        batch_size, std::cref(A_offsets), std::cref(B_offsets), std::cref(C_offsets),
-                        start, end);
+        workers.emplace_back(matmul_tile_rows_tiled, std::cref(A), std::cref(B), std::ref(C),
+                             m, n, p,
+                             batch_size, std::cref(A_offsets), std::cref(B_offsets), std::cref(C_offsets),
+                             start, end);
         start = end;
     }
 
@@ -67,15 +78,19 @@ void matmul_tile_row_parallel(const std::vector<float>& A, std::vector<size_t>A_
     }
 }
 
-void matmul_transposed(const std::vector<float>& A, 
-                       const std::vector<size_t>& A_shape,
-                       const std::vector<float>& B, 
-                       const std::vector<size_t>& B_shape,
-                       std::vector<float>& C, 
-                       const std::vector<size_t>& C_shape,
-                       const std::vector<size_t>& batch_shape,
-                       size_t m, size_t n, size_t p, 
-                       bool transpose_A, bool transpose_B) {
+void matmul_transposed_tile_row(const std::vector<float>& A, 
+                                      const std::vector<size_t>& A_shape,
+                                      const std::vector<float>& B, 
+                                      const std::vector<size_t>& B_shape,
+                                      std::vector<float>& C, 
+                                      const std::vector<size_t>& C_shape,
+                                      const std::vector<size_t>& batch_shape,
+                                      const std::vector<size_t>& A_offsets,
+                                      const std::vector<size_t>& B_offsets,
+                                      const std::vector<size_t>& C_offsets,
+                                      size_t m, size_t n, size_t p, 
+                                      bool transpose_A, bool transpose_B, 
+                                      size_t start_row, size_t end_row) {
     
     /* Compute batch size */
     size_t batch_size = 1;
@@ -96,36 +111,83 @@ void matmul_transposed(const std::vector<float>& A,
 
     /* Iterate over batches */
     for (size_t b = 0; b < batch_size; b++) {
-        std::vector<size_t> batch_idx = unravel_index(b, batch_shape);
-
         /* Compute offset into A */
-        size_t A_offset = ravel_index(batch_idx, 
-            std::vector<size_t>(A_shape.begin(), A_shape.end()-2)) 
-            * (m * n);
+        size_t A_offset = A_offsets[b];
 
         /* Compute offset into B */
-        size_t B_offset = ravel_index(batch_idx, 
-            std::vector<size_t>(B_shape.begin(), B_shape.end()-2)) 
-            * (n * p);
+        size_t B_offset = B_offsets[b];
 
         /* Compute offset into C */
-        size_t C_offset = ravel_index(batch_idx, 
-            std::vector<size_t>(C_shape.begin(), C_shape.end()-2)) 
-            * (m * p);
+        size_t C_offset = C_offsets[b];
 
-        /* Matrix multiplication */
-        for (size_t i = 0; i < m; i++) {
-            for (size_t j = 0; j < p; j++) {
-                float sum = 0.0f;
-                for (size_t k = 0; k < n; k++) {
-                    sum += A[get_A_index(A_offset, i, k, m, n)]
-                         * B[get_B_index(B_offset, k, j, n, p)];
+        /* Process matrix multiplication with tiling */
+        for (size_t i = start_row; i < end_row; i += TILE_SIZE) {
+            size_t i_end = std::min(i + TILE_SIZE, end_row);
+
+            for (size_t j = 0; j < p; j += TILE_SIZE) {
+                size_t j_end = std::min(j + TILE_SIZE, p);
+                for (size_t k = 0; k < n; k += TILE_SIZE) {
+                    size_t k_end = std::min(k + TILE_SIZE, n);
+
+                    /* Compute small tiles */
+                    for (size_t ii = i; ii < i_end; ++ii) {
+                        for (size_t jj = j; jj < j_end; ++jj) {
+                            float sum = 0.0f;
+                            for (size_t kk = k; kk < k_end; ++kk) {
+                                sum += A[get_A_index(A_offset, ii, kk, m, n)]
+                                     * B[get_B_index(B_offset, kk, jj, n, p)];
+                            }
+                            /* Store result in C */
+                            C[C_offset + ii * p + jj] += sum;
+                        }
+                    }
                 }
-                /* Store result in C */
-                C[C_offset + i * p + j] = sum;
             }
         }
     }
+}
+
+void matmul_transposed_tile_row_parallel(const std::vector<float>& A, 
+                       const std::vector<size_t>& A_shape,
+                       const std::vector<float>& B, 
+                       const std::vector<size_t>& B_shape,
+                       std::vector<float>& C, 
+                       const std::vector<size_t>& C_shape,
+                       const std::vector<size_t>& batch_shape,
+                       const std::vector<size_t>& A_offsets,
+                       const std::vector<size_t>& B_offsets,
+                       const std::vector<size_t>& C_offsets,
+                       size_t m, size_t n, size_t p, 
+                       bool transpose_A, bool transpose_B,
+                       const size_t num_threads) {
+                        
+                    std::vector<std::thread> workers;
+                    size_t rows_per_thread = m / num_threads;
+                    size_t remainder = m % num_threads;
+
+                    size_t start = 0;
+                    for (size_t t = 0; t < num_threads; ++t) {
+                        /* Spread remainder across first threads */
+                        size_t end = start + rows_per_thread + (t < remainder ? 1 : 0);
+                        
+                        workers.emplace_back(
+                            matmul_transposed_tile_row, 
+                            std::cref(A), std::cref(A_shape),
+                            std::cref(B), std::cref(B_shape),
+                            std::ref(C), std::cref(C_shape),
+                            std::cref(batch_shape),
+                            std::cref(A_offsets), std::cref(B_offsets), std::cref(C_offsets),
+                            m, n, p,
+                            transpose_A, transpose_B,
+                            start, end
+                        );
+                        start = end;
+                    }
+
+                    for (auto& worker : workers) {
+                        worker.join();
+                    }
+    
 }
 
 /*
@@ -139,7 +201,7 @@ void matmul_transposed(const std::vector<float>& A,
  * C = A.matul(B) has shape [..., m, p]
  * n_threads: number of threads to use
  */
-Tensor Tensor::matmul(const Tensor &other, size_t num_threads) const {
+Tensor Tensor::matmul(const Tensor &other, const size_t num_threads) const {
     /* ensure that both tensors have at least two dimensions */
     if (shape.size() < 2 || other.shape.size() < 2) {
         throw std::invalid_argument(
@@ -200,7 +262,6 @@ Tensor Tensor::matmul(const Tensor &other, size_t num_threads) const {
     /* allocate memory for result data */
     std::vector<float> result_data(total_elems, 0.0f);
 
-
     matmul_tile_row_parallel(this->data, this->shape, other.data, other.shape, result_data,
                             batch_size, batch_shape,
                             m, n, p,
@@ -211,77 +272,86 @@ Tensor Tensor::matmul(const Tensor &other, size_t num_threads) const {
 
     /* construct backward function */
     if (result->requires_grad) {
+        /*
+        * copy data necessary for backward function
+        * to avoid dangling references
+        */
+        auto this_requires_grad  = requires_grad;
+        auto other_requires_grad = other.requires_grad;
 
-        /* construct backward function */
-        if (result->requires_grad) {
-            /*
-            * copy data necessary for backward function
-            * to avoid dangling references
-            */
-            auto this_requires_grad  = requires_grad;
-            auto other_requires_grad = other.requires_grad;
+        auto this_grad          = this->grad;
+        auto other_grad         = other.grad;
+        auto result_grad        = result->grad;
 
-            auto this_grad          = this->grad;
-            auto other_grad         = other.grad;
-            auto result_grad        = result->grad;
+        auto A_data             = data;
+        auto B_data             = other.data;
 
-            auto A_data             = data;
-            auto B_data             = other.data;
+        auto this_backward_fn   = this->backward_fn;
+        auto other_backward_fn  = other.backward_fn;
 
-            auto this_backward_fn   = this->backward_fn;
-            auto other_backward_fn  = other.backward_fn;
+        auto saved_this_shape  = shape;
+        auto saved_other_shape = other.shape;
+        auto saved_result_shape = result_shape;
+        auto saved_batch_shape = batch_shape;
 
-            auto saved_this_shape  = shape;
-            auto saved_other_shape = other.shape;
-            auto saved_result_shape = result_shape;
-            auto saved_batch_shape = batch_shape;
+        size_t mm = m;
+        size_t nn = n;
+        size_t pp = p;
 
-            size_t mm = m;
-            size_t nn = n;
-            size_t pp = p;
+        /* insert result into the computation graph */
+        if (this_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(*this));
+        if (other_requires_grad)
+            result->parents.push_back(std::make_shared<Tensor>(other));
 
-            /* insert result into the computation graph */
-            if (this_requires_grad)
-                result->parents.push_back(std::make_shared<Tensor>(*this));
-            if (other_requires_grad)
-                result->parents.push_back(std::make_shared<Tensor>(other));
+        result->backward_fn = [
+            this_requires_grad, other_requires_grad,
+            this_grad, other_grad,
+            result_grad, A_data, B_data,
+            this_backward_fn, other_backward_fn,
+            saved_this_shape, saved_other_shape, saved_result_shape,
+            saved_batch_shape, mm, nn, pp
+        ](const size_t num_threads) {
+            /* compute number of batches */
+            size_t batch_size = 1;
+            for (auto d : saved_batch_shape) {
+                batch_size *= d;
+            }
 
-            result->backward_fn = [
-                this_requires_grad, other_requires_grad,
-                this_grad, other_grad,
-                result_grad, A_data, B_data,
-                this_backward_fn, other_backward_fn,
-                saved_this_shape, saved_other_shape, saved_result_shape,
-                saved_batch_shape, mm, nn, pp
-            ]() {
-                /* compute number of batches */
-                size_t batch_size = 1;
-                for (auto d : saved_batch_shape) {
-                    batch_size *= d;
-                }
+            std::vector<size_t> A_offsets(batch_size, 0);
+            std::vector<size_t> B_offsets(batch_size, 0);
+            std::vector<size_t> C_offsets(batch_size, 0);
 
-                /* dA = dC * B^T */
-                if (this_requires_grad && this_grad) {
-                    matmul_transposed(result_grad->data, saved_result_shape, 
-                                      B_data, saved_other_shape, 
-                                      this_grad->data, saved_this_shape, 
-                                      saved_batch_shape, 
-                                      mm, pp, nn, // Correct dimensions
-                                      false, true); // No transpose on dC, transpose B
-                }
+            for (size_t b = 0; b < batch_size; ++b) {
+                std::vector<size_t> batch_index = unravel_index(b, saved_batch_shape);
+                
+                A_offsets[b] = ravel_index(batch_index, std::vector<size_t>(saved_this_shape.begin(), saved_this_shape.end() - 2)) * mm * nn;
+                B_offsets[b] = ravel_index(batch_index, std::vector<size_t>(saved_other_shape.begin(), saved_other_shape.end() - 2)) * nn * pp;
+                C_offsets[b] = b * (mm * pp);
+            }
+            /* dA = dC * B^T */
+            if (this_requires_grad && this_grad) {
+                matmul_transposed_tile_row_parallel(result_grad->data, saved_result_shape, 
+                                    B_data, saved_other_shape, 
+                                    this_grad->data, saved_this_shape, 
+                                    saved_batch_shape,
+                                    C_offsets, B_offsets, A_offsets,
+                                    mm, pp, nn,
+                                    false, true, num_threads); // No transpose on dC, transpose B
+            }
 
-                /* dB = A^T * dC */
-                if (other_requires_grad && other_grad) {
-                    matmul_transposed(A_data, saved_this_shape, 
-                                      result_grad->data, saved_result_shape, 
-                                      other_grad->data, saved_other_shape, 
-                                      saved_batch_shape, 
-                                      nn, mm, pp, // Correct dimensions
-                                      true, false); // Transpose A, no transpose on dC
-                }
-            };
+            /* dB = A^T * dC */
+            if (other_requires_grad && other_grad) {
+                matmul_transposed_tile_row_parallel(A_data, saved_this_shape, 
+                                    result_grad->data, saved_result_shape, 
+                                    other_grad->data, saved_other_shape, 
+                                    saved_batch_shape,
+                                    A_offsets, C_offsets, B_offsets,
+                                    nn, mm, pp,
+                                    true, false, num_threads); // Transpose A, no transpose on dC
+            }
+        };
 
-        }
     }
 
     return *result;

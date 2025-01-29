@@ -57,9 +57,9 @@ target_include_directories(tutorial PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT
 
 # Code for performance evaluation
 add_library(timer STATIC ${PROJECT_ROOT_DIR}/performance_evals/timer.cpp)
-add_executable(matmul ${PROJECT_ROOT_DIR}/performance_evals/matmul.cpp)
-target_link_libraries(matmul PRIVATE timer cppgrad)
-target_include_directories(matmul PRIVATE performance_eval)
+add_executable(eval ${PROJECT_ROOT_DIR}/performance_evals/eval.cpp)
+target_link_libraries(eval PRIVATE timer cppgrad)
+target_include_directories(eval PRIVATE performance_eval)
 
 # Set flags for LibTorch
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")

@@ -58,7 +58,7 @@ target_include_directories(tutorial PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT
 # Code for performance evaluation
 add_library(timer STATIC ${PROJECT_ROOT_DIR}/performance_evals/timer.cpp)
 add_executable(eval ${PROJECT_ROOT_DIR}/performance_evals/eval.cpp)
-target_link_libraries(eval PRIVATE timer cppgrad)
+target_link_libraries(eval PRIVATE timer cppgrad timer)
 target_include_directories(eval PRIVATE performance_eval)
 
 # Set flags for LibTorch

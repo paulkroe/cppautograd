@@ -168,3 +168,16 @@ Tensor Tensor::get_grad() const{
     }
     return *(grad.get());
 }
+
+/* 
+ * disable gradient computation
+ */
+void Tensor::eval() {
+    requires_grad = false;
+}
+/*
+ * enable gradient computation
+ */
+void Tensor::train() {
+    requires_grad = true;
+}

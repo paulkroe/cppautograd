@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include "../grad/cppgrad.h"
 #include "../grad/modules.h"
+#include "../performance_evals/timer.h"
 
 class MNISTDataset : public torch::data::datasets::Dataset<MNISTDataset> {
     std::vector<torch::Tensor> images_;
@@ -23,21 +24,24 @@ public:
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty()) {
-                continue; // Skip empty lines
+                /* Skip empty lines */
+                continue;
             }
 
             std::stringstream ss(line);
             std::string value;
 
-            // Parse label (first value in the row)
+            /* Parse label (first value in the row) */
             std::getline(ss, value, ',');
-            float label = std::stof(value);  // Store labels as float
+            /* Store labels as float */
+            float label = std::stof(value);
 
-            // Parse pixels (remaining 784 values)
+            /* Parse pixels (remaining 784 values) */
             std::vector<float> pixels;
             while (std::getline(ss, value, ',')) {
                 if (!value.empty()) {
-                    pixels.push_back(std::stof(value) / 255.0f); // Normalize to [0, 1]
+                    /* Normalize to [0, 1] */
+                    pixels.push_back(std::stof(value) / 255.0f);
                 }
             }
 
@@ -46,9 +50,10 @@ public:
                                          std::to_string(pixels.size()));
             }
 
-            // Store as Tensors
+            /* Store as Tensors */
             images_.push_back(torch::tensor(pixels).view({1, 28, 28}));
-            labels_.push_back(torch::tensor(label, torch::kFloat32)); // Store labels as float
+            /* Store labels as float */
+            labels_.push_back(torch::tensor(label, torch::kFloat32));
         }
     }
 
@@ -61,10 +66,11 @@ public:
     }
 };
 
-int main() {
-    const std::string dataset_path = "../../demo/data/archive/mnist_train.csv";
+void train(const size_t num_threads = 1) {
+    const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    const std::string test_path = "../../demo/data/archive/mnist_test.csv";
     
-    // Define the model
+    /* Define the model */
     Linear linear1(784, 512);
     Linear linear2(512, 256);
     Linear linear3(256, 128);
@@ -72,35 +78,45 @@ int main() {
     Linear linear5(64, 10);
 
     try {
-        // Create Dataset and DataLoader
-        auto dataset = MNISTDataset(dataset_path)
+        /* Create Dataset and DataLoader */
+        auto options = torch::data::DataLoaderOptions().batch_size(16);
+        
+        auto dataset_train = MNISTDataset(train_path)
                            .map(torch::data::transforms::Normalize<>(0.0, 1.0)) // Normalize
                            .map(torch::data::transforms::Stack<>());
 
-        auto options = torch::data::DataLoaderOptions().batch_size(16);
+        auto data_loader_train = torch::data::make_data_loader(
+            std::move(dataset_train), options);
 
-        auto data_loader = torch::data::make_data_loader(
-            std::move(dataset), options);
+        auto dataset_test = MNISTDataset(test_path)
+                           .map(torch::data::transforms::Normalize<>(0.0, 1.0)) // Normalize
+                           .map(torch::data::transforms::Stack<>());
+
+        auto data_loader_test = torch::data::make_data_loader(
+            std::move(dataset_test), options);
 
         int epoch = 0;
         
-        // TRAINING LOOP
-        int num_epochs = 1; // Set the number of epochs
+        /* TRAINING LOOP */
+        int num_epochs = 1;
 
-        // Compute the total number of batches in the DataLoader
-        int num_batches = std::distance(data_loader->begin(), data_loader->end());
+        /* Compute the total number of batches in the DataLoader */
+        int num_batches_train = std::distance(data_loader_train->begin(), data_loader_train->end());
 
         for (int epoch = 0; epoch < num_epochs; epoch++) {
-            int batch_idx = 0; // Track current batch number
+            /* Current batch number */
+            int batch_idx = 0;
 
-            for (auto& batch : *data_loader) {
-                auto images = batch.data;  // Shape: [batch_size, 1, 28, 28]
-                auto labels = batch.target; // Shape: [batch_size]
+            for (auto& batch : *data_loader_train) {
+                /* Shape: [batch_size, 1, 28, 28] */
+                auto images = batch.data;
+                /* Shape: [batch_size] */
+                auto labels = batch.target;
 
-                // Flatten images to [batch_size, 784]
+                /* Flatten images to [batch_size, 784] */
                 auto flattened_images = images.view({images.size(0), -1}).to(torch::kCPU).contiguous();
 
-                // Convert images to std::vector<float>
+                /* Convert images to std::vector<float> */
                 std::vector<float> images_vec(flattened_images.numel());
                 std::memcpy(
                     images_vec.data(),
@@ -108,7 +124,7 @@ int main() {
                     images_vec.size() * sizeof(float)
                 );
 
-                // Convert labels to std::vector<float> (stored as float instead of int)
+                /* Convert labels to std::vector<float> (stored as float instead of int) */
                 std::vector<float> labels_vec(labels.numel());
                 std::memcpy(
                     labels_vec.data(),
@@ -119,23 +135,26 @@ int main() {
                 /* Perform forward pass */
                 Tensor x = Tensor(images_vec, {16, 784}, false);
                 Tensor y = Tensor(labels_vec, {16}, false);
+                
                 Tensor y_pred = linear5.forward(
                                             linear4.forward(
                                                     linear3.forward(
                                                             linear2.forward(
-                                                                    linear1.forward(x).relu()
-                                                            ).relu()
-                                                    ).relu()
-                                            )
+                                                                    linear1.forward(x).relu(), num_threads
+                                                            ).relu(), num_threads
+                                                    ).relu(), num_threads
+                                            ), num_threads
                                     );
 
                 Tensor loss = CrossEntropyLoss(y_pred, y);
-                loss.backward();
+                loss.backward(num_threads);
 
-                // Print loss with epoch and batch progress
+                /* Print loss with epoch and batch progress */
+                if (batch_idx % 500 == 0) {
                 std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
-                        << "Batch [" << (batch_idx + 1) << "/" << num_batches << "] "
+                        << "Batch [" << (batch_idx + 1) << "/" << num_batches_train << "] "
                         << "Loss: " << loss.data[0] << std::endl;
+                }
 
                 /* Update weights */
                 for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
@@ -149,18 +168,25 @@ int main() {
                     layer->bias.zero_grad();
                 }
 
-                batch_idx++; // Increment batch counter
+                batch_idx++;
             }
         }
 
 
-        // EVALUATION PHASE
+        /* EVALUATION PHASE */
+        for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
+            layer->eval();
+        }
+
         int total_correct = 0;
         int total_samples = 0;
         std::unordered_map<int, int> correct_per_class;
         std::unordered_map<int, int> total_per_class;
-
-        for (auto& batch : *data_loader) {
+        
+        /* Compute the total number of batches in the DataLoader */
+        int num_batches_test = std::distance(data_loader_test->begin(), data_loader_test->end());
+        
+        for (auto& batch : *data_loader_test) {
             auto images = batch.data;
             auto labels = batch.target;
 
@@ -186,19 +212,19 @@ int main() {
                                         linear4.forward(
                                                 linear3.forward(
                                                         linear2.forward(
-                                                                linear1.forward(x).relu()
-                                                        ).relu()
-                                                ).relu()
-                                        )
+                                                                linear1.forward(x).relu(), num_threads
+                                                        ).relu(), num_threads
+                                                ).relu(), num_threads
+                                        ), num_threads
                                 );
 
             std::vector<float> predictions(y_pred.data.begin(), y_pred.data.end());
 
-            // Convert softmax output to class prediction
+            /* Convert softmax output to class prediction */
             for (size_t i = 0; i < labels_vec.size(); i++) {
                 int predicted_class = std::max_element(predictions.begin() + i * 10,
                                                        predictions.begin() + (i + 1) * 10) - (predictions.begin() + i * 10);
-                int true_class = static_cast<int>(labels_vec[i]);  // Convert float to int for comparison
+                int true_class = static_cast<int>(labels_vec[i]);
 
                 if (predicted_class == true_class) {
                     total_correct++;
@@ -223,5 +249,18 @@ int main() {
         std::cerr << "Error: " << e.what() << std::endl;
     }
 
-    return 0;
+    return;
+}
+
+int main() {
+    train();
+    float time = 0.0f;
+    std::vector<int> num_threads = {1, 2, 4, 8};
+    
+    for (auto t: num_threads) {
+        time += ExecutionTimer::measure("train", [t]() {      train(t);    });
+        std::cout << "=========================================================" << std::endl;
+        std::cout << "Average time for training with " << t << " threads: " << time << " ms" << std::endl;
+        time = 0.0f;
+    }
 }

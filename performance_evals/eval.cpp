@@ -25,7 +25,7 @@ int main() {
         for (auto t: num_threads) {
             avg = 0.0f;
             for (int i = 0; i < num_runs; i++) {
-                avg += ExecutionTimer::measure("addition+backward", [s, t]() {      addition_backward_test(t, s);    });
+                avg += ExecutionTimer::measure("matmul_test", [s, t]() {      matmul_test(t, s);    });
             }
             std::cout << "=========================================================" << std::endl;
             std::cout << "Average time for matmul with size " << s << " and " << t << " threads: " << avg / num_runs << " ms" << std::endl;

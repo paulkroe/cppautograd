@@ -145,6 +145,10 @@ public:
     void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const; 
     /* helper function returning the gradient tensor */
     Tensor get_grad() const;
+    /* disable gradient computation */
+    void eval();
+    /* enable gradient computation */
+    void train();
    private:
 };
 

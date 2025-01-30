@@ -30,7 +30,7 @@ public:
     std::vector<size_t> shape;
     bool requires_grad;
     std::shared_ptr<Tensor> grad;
-    std::function<void(const size_t num_threads)> backward_fn;
+    std::function<void()> backward_fn;
     std::vector<std::shared_ptr<Tensor>> parents;
 
     /* constructor inferring tensor shape to be 1D */
@@ -72,7 +72,7 @@ public:
     }
 
     /* backward function */
-    void backward(const size_t num_threads = 1);
+    void backward();
 
     /* binary addition operator */
     Tensor operator+(const Tensor& other) const;
@@ -91,7 +91,7 @@ public:
     /* overload the << operator */
     friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor);
     /* matrix multiplication */
-    Tensor matmul(const Tensor &other, const size_t num_threads = 1) const;
+    Tensor matmul(const Tensor &other) const;
     /* sum over given dimension */
     Tensor sum(size_t dim) const;
     /* sum over trailing dimension */

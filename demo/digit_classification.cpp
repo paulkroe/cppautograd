@@ -140,14 +140,14 @@ void train(const size_t num_threads = 1) {
                                             linear4.forward(
                                                     linear3.forward(
                                                             linear2.forward(
-                                                                    linear1.forward(x).relu(), num_threads
-                                                            ).relu(), num_threads
-                                                    ).relu(), num_threads
-                                            ), num_threads
+                                                                    linear1.forward(x).relu()
+                                                            ).relu()
+                                                    ).relu()
+                                            )
                                     );
 
                 Tensor loss = CrossEntropyLoss(y_pred, y);
-                loss.backward(num_threads);
+                loss.backward();
 
                 /* Print loss with epoch and batch progress */
                 if (batch_idx % 500 == 0) {
@@ -212,10 +212,10 @@ void train(const size_t num_threads = 1) {
                                         linear4.forward(
                                                 linear3.forward(
                                                         linear2.forward(
-                                                                linear1.forward(x).relu(), num_threads
-                                                        ).relu(), num_threads
-                                                ).relu(), num_threads
-                                        ), num_threads
+                                                                linear1.forward(x).relu()
+                                                        ).relu()
+                                                ).relu()
+                                        )
                                 );
 
             std::vector<float> predictions(y_pred.data.begin(), y_pred.data.end());

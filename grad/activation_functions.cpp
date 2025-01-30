@@ -29,10 +29,7 @@ Tensor Tensor::relu() const{
         result->backward_fn = [
             this_requires_grad, this_grad,
             this_data, result_grad
-        ](const size_t num_threads) {
-
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
+        ]() {
 
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {

@@ -77,10 +77,7 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
             this_requires_grad, this_grad,
             result_grad, this_data, this_shape,
             result_shape, num_classes
-        ](const size_t num_threads) {
-
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
+        ]() {
 
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); ++i) {

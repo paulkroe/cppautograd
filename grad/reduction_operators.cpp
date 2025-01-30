@@ -88,11 +88,8 @@ Tensor Tensor::sum(size_t dim) const {
         result->backward_fn = [
             this_requires_grad, this_grad, this_shape,
             result_grad, result_shape, reduced_dim, this_backward_fn
-        ](const size_t num_threads) {
+        ]() {
             
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
-                
             /* 
              * expand `result_grad` (shape = result_shape)
              * back to `this_shape`. 
@@ -239,10 +236,7 @@ Tensor Tensor::mean(size_t dim) const {
         result->backward_fn = [
             this_requires_grad, this_grad, this_shape,
             result_grad, result_shape, reduced_dim, divisor_f, this_backward_fn
-        ](const size_t num_threads) {
-
-                /* serial backward function, num_threads not used */
-                (void)num_threads;
+        ]() {
             
                /* 
                 * expand `result_grad` (shape = result_shape)

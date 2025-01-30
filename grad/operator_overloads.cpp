@@ -65,10 +65,8 @@ Tensor Tensor::operator+(const Tensor& other) const{
                     this_grad, other_grad,
                     this_backward_fn, other_backward_fn,
                     result_grad, this_shape = this->shape, other_shape = other.shape,
-                    result_shape = result->shape](const size_t num_threads) 
+                    result_shape = result->shape]() 
         {
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
 
             /* 1) Gradient w.r.t. x (this->data) */
             if (this_requires_grad && this_grad) {
@@ -136,9 +134,7 @@ Tensor Tensor::operator-() const {
 
         result->backward_fn = [sz,
                               this_requires_grad, this_grad,
-                              this_backward_fn, result_grad](const size_t num_threads) {
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
+                              this_backward_fn, result_grad]() {
             if (this_requires_grad && this_grad) {
                 for (size_t i = 0; i < sz; i++) {
                     this_grad->data[i] -= result_grad->data[i];
@@ -235,10 +231,8 @@ Tensor Tensor::operator*(const Tensor& other) const {
                     other_data = other.data,
                     this_shape = this->shape,
                     other_shape = other.shape,
-                    result_shape = result->shape](const size_t num_threads) 
+                    result_shape = result->shape]() 
         {
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
 
             /* 1) Gradient w.r.t. x (this->data) */
             if (this_requires_grad && this_grad) {
@@ -367,11 +361,8 @@ Tensor Tensor::operator/(const Tensor& other) const {
                     other_data = other.data,
                     this_shape = this->shape,
                     other_shape = other.shape,
-                    result_shape = result->shape](const size_t num_threads) 
+                    result_shape = result->shape]() 
         {
-            /* serial backward function, num_threads not used */
-            (void)num_threads;
-            
             /* 1) Gradient w.r.t. x (this->data) */
             if (this_requires_grad && this_grad)
             {

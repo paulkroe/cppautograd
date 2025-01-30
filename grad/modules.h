@@ -13,8 +13,8 @@ class Linear {
             bias(Tensor::bias_uniform(out_features, true)) {}
 
 
-        Tensor forward(Tensor x, const size_t num_threads = 1) {
-            return x.matmul(weight, num_threads) + bias;
+        Tensor forward(Tensor x) {
+            return x.matmul(weight) + bias;
         }
 
         void eval() {

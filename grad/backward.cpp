@@ -39,15 +39,6 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
         }
     }
 
-    /* Debug: Print children */
-    for (auto& [id, child_ids] : children) {
-        std::cout << "Node ID: " << id << " has children: ";
-        for (auto& child_id : child_ids) {
-            std::cout << child_id << " ";
-        }
-        std::cout << std::endl;
-    }
-
     // Second pass: topological order
     std::set<size_t> visited_backwards;
     std::map<size_t, std::function<void()>> order;
@@ -84,12 +75,6 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
         } else {
             to_visit_final.push(curr);  // Retry later
         }
-    }
-
-    /* Debug: Print order from front to back */
-    std::cout << "Execution Order (Backprop):" << std::endl;
-    for (auto& [id, fn] : order) {
-        std::cout << "Node ID: " << id << " has backward function" << std::endl;
     }
 
     return order;

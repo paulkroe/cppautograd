@@ -28,10 +28,14 @@ Tensor Tensor::log() const {
 
         std::thread::id tid = std::this_thread::get_id();
         
-        /* Store parents in a thread-safe manner */
+        /* add result to computation graph */
         {
             std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
-            if (this_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(*this));
+            if (this_requires_grad) {
+                auto parent = std::make_shared<Tensor>(*this);
+                parent->id = id;
+                result->parents[tid].insert(parent);
+            }
         }
 
         /* Ensure thread-local gradients are initialized */
@@ -91,7 +95,7 @@ Tensor Tensor::exp() const{
 
         std::thread::id tid = std::this_thread::get_id();
 
-        /* Store parents in a thread-safe manner */
+        /* add result to computation graph */
         {
             std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
             if (this_requires_grad) {

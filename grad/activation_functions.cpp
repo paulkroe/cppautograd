@@ -22,13 +22,18 @@ Tensor Tensor::relu() const{
 
         std::thread::id tid = std::this_thread::get_id();
 
-        /* Store parents in a thread-safe manner */
+        /* add result to computation graph */
         {
             std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
-            if (this_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(*this));
+            if (this_requires_grad) {
+                auto parent = std::make_shared<Tensor>(*this);
+                /* should be the same tensor in the computation graph */
+                parent->id = this->id;
+                result->parents[tid].insert(parent);
+            }
         }
 
-        /* Ensure thread-local gradients are initialized */
+        /* ensure thread-local gradients are initialized */
         std::shared_ptr<Tensor> this_grad, other_grad;
         {
             std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);

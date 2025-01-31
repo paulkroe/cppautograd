@@ -42,8 +42,8 @@ int main() {
     h.backward(); // Compute gradients
     
     // Print the computed gradients
-    std::cout << "Gradient of d: " << d.get_grad() << "\n";
-    std::cout << "Gradient of e: " << e.get_grad() << "\n";
+    std::cout << "Gradient of d: " << d.grad() << "\n";
+    std::cout << "Gradient of e: " << e.grad() << "\n";
 
     std::cout << "=== Backpropagation ===\n";
     // Step 5: Computing gradients with a mathematical function
@@ -54,7 +54,7 @@ int main() {
     Tensor y = (x.exp() + x.log()).mean().sum();
     y.backward(); // Compute gradients
     
-    std::cout << "Gradient of x: " << x.get_grad() << "\n";
+    std::cout << "Gradient of x: " << x.grad() << "\n";
 
     std::cout << "=== Multi-Dimensional Tensors ===\n";
     // Step 6: Performing more complex tensor operations
@@ -67,7 +67,7 @@ int main() {
     Tensor result = m1 * m2 + m3;
     result.sum().sum().backward(); // Reduce to scalar and compute gradients
     
-    std::cout << "Gradient of m1: " << m1.get_grad() << "\n";
+    std::cout << "Gradient of m1: " << m1.grad() << "\n";
 
     std::cout << "=== Broadcasting Capabilities ===\n";
     // Step 7: Demonstrating broadcasting capabilities
@@ -81,7 +81,7 @@ int main() {
     
     // Reduce to scalar before backpropagation
     broadcasted.sum().sum().backward();
-    std::cout << "Gradient of small: " << small.get_grad() << "\n";
+    std::cout << "Gradient of small: " << small.grad() << "\n";
 
     return 0;
 }

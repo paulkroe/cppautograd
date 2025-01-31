@@ -69,9 +69,7 @@ Tensor Tensor::sum(size_t dim) const {
          * to avoid dangling references
          */
         auto this_requires_grad = this->requires_grad;
-        auto this_grad = this->grad;
         auto this_shape = this->shape;
-        auto result_grad = result->grad;
         auto result_shape = result->shape;
         auto this_backward_fn = this->backward_fn;
 
@@ -81,15 +79,37 @@ Tensor Tensor::sum(size_t dim) const {
          */
         auto reduced_dim = dim;
 
-        /* insert result into the computation graph */
-        if (this_requires_grad)
-            result->parents.push_back(std::make_shared<Tensor>(*this));
+        std::thread::id tid = std::this_thread::get_id();
+
+        /* Store parents in a thread-safe manner */
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            if (this_requires_grad) {
+                auto parent = std::make_shared<Tensor>(*this);
+                parent->id = id; 
+                result->parents[tid].insert(parent);
+            }
+        }
+
+        /* Ensure thread-local gradients are initialized */
+        std::shared_ptr<Tensor> this_grad, other_grad;
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (this_requires_grad) {
+                if (!this->thread_gradients[tid]) {
+                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this_shape, false);
+                }
+                this_grad = this->thread_gradients[tid];
+            }
+        }
 
         result->backward_fn = [
             this_requires_grad, this_grad, this_shape,
-            result_grad, result_shape, reduced_dim, this_backward_fn
+            result, result_shape, reduced_dim, this_backward_fn
         ]() {
             
+            std::thread::id tid = std::this_thread::get_id();
+
             /* 
              * expand `result_grad` (shape = result_shape)
              * back to `this_shape`. 
@@ -104,8 +124,8 @@ Tensor Tensor::sum(size_t dim) const {
              * then for each `j` in [0..this_shape[reduced_dim]),
              * spread the gradient`
              */
-            for (size_t i  = 0; i < result_grad->data.size(); ++i) {
-                float grad_val = result_grad->data[i];
+            for (size_t i  = 0; i < result->thread_gradients[tid]->data.size(); ++i) {
+                float grad_val = result->thread_gradients[tid]->data[i];
 
                 /* coords_reduced in the result's shape */
                 auto coords_reduced = unravel_index(i, result_shape);
@@ -221,23 +241,39 @@ Tensor Tensor::mean(size_t dim) const {
          * to avoid dangling references
          */
         auto this_requires_grad = this->requires_grad;
-        auto this_grad = this->grad;
         auto this_shape = this->shape;
-        auto result_grad = result->grad;
         auto result_shape = result->shape;
         size_t reduced_dim = dim;
         auto this_backward_fn = this->backward_fn;
         float divisor_f = divisor;
 
-        /* insert result into the computation graph */
-        if (this_requires_grad)
-            result->parents.push_back(std::make_shared<Tensor>(*this));
+        std::thread::id tid = std::this_thread::get_id();       
+
+        /* Store parents in a thread-safe manner */
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            if (this_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(*this));
+        }
+        
+        /* Ensure thread-local gradients are initialized */
+        std::shared_ptr<Tensor> this_grad, other_grad;
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (this_requires_grad) {
+                if (!this->thread_gradients[tid]) {
+                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this_shape, false);
+                }
+                this_grad = this->thread_gradients[tid];
+            }
+        }
 
         result->backward_fn = [
             this_requires_grad, this_grad, this_shape,
-            result_grad, result_shape, reduced_dim, divisor_f, this_backward_fn
+            result, result_shape, reduced_dim, divisor_f, this_backward_fn
         ]() {
             
+                std::thread::id tid = std::this_thread::get_id();
+
                /* 
                 * expand `result_grad` (shape = result_shape)
                 * back to `this_shape`. 
@@ -252,8 +288,8 @@ Tensor Tensor::mean(size_t dim) const {
                 * then for each `j` in [0..this_shape[reduced_dim]),
                 * spread the gradient`
                 */
-                for (size_t i = 0; i < result_grad->data.size(); ++i) {
-                    float grad_val = result_grad->data[i];
+                for (size_t i = 0; i < result->thread_gradients[tid]->data.size(); ++i) {
+                    float grad_val = result->thread_gradients[tid]->data[i];
                 
                     /* coords_reduced in the result's shape */
                     auto coords_reduced = unravel_index(i, result_shape);

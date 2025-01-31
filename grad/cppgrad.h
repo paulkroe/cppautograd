@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -25,50 +26,65 @@ void set_seed(int seed);
 
 class Tensor {
 public:
+    /* Global mutex for thread_gradients */
+    static std::mutex GLOBAL_GRAD_MUTEX;      
+    /* Global mutex for parents */
+    static std::mutex GLOBAL_PARENTS_MUTEX;   
+
     size_t id;
     std::vector<float> data;
     std::vector<size_t> shape;
     bool requires_grad;
-    std::shared_ptr<Tensor> grad;
+    mutable std::unordered_map<std::thread::id, std::shared_ptr<Tensor>> thread_gradients;
     std::function<void()> backward_fn;
-    std::vector<std::shared_ptr<Tensor>> parents;
+    mutable std::unordered_map<std::thread::id, std::unordered_set<std::shared_ptr<Tensor>>> parents;
 
     /* constructor inferring tensor shape to be 1D */
     Tensor(const std::vector<float>& data, bool requires_grad = false)
-        : data(data), requires_grad(requires_grad), grad(nullptr) {
+        : data(data), requires_grad(requires_grad) {
         shape = { data.size() };
-        if (requires_grad) {
-            grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), false);
-            grad->shape = shape;
-        }
         id = get_id();
+
+        if (requires_grad) {
+            std::thread::id tid = std::this_thread::get_id();
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), shape, false);
+        }
     }
 
     /* constructor creating a tensor with explicit shape, shape is checked */
     Tensor(const std::vector<float>& data, const std::vector<size_t>& shape, bool requires_grad = false)
-        : data(data), shape(shape), requires_grad(requires_grad), grad(nullptr) {
+        : data(data), shape(shape), requires_grad(requires_grad) {
         /* check if shape matches */
         if (numel(shape) != data.size()) {
             throw std::invalid_argument("Data size does not match shape.");
         }
-        if (requires_grad) {
-            grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), shape, false);
-        }
         id = get_id();
+
+        if (requires_grad) {
+            std::thread::id tid = std::this_thread::get_id();
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), shape, false);
+        }
     }
 
     /* constructor creating a tensor with an explicit shape and gradient */
     Tensor(const std::vector<float>& data, const std::vector<size_t>& shape, bool requires_grad, std::shared_ptr<Tensor> grad)
-        : data(data), shape(shape), requires_grad(requires_grad), grad(grad) {
+        : data(data), shape(shape), requires_grad(requires_grad) {
         /* check if shape matches */
         if (numel(shape) != data.size()) {
             throw std::invalid_argument("Data size does not match shape.");
         }
-        if (requires_grad && grad == nullptr) {
-            this->grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), false);
-            this->grad->shape = shape;
-        }
         id = get_id();
+
+        if (requires_grad) {
+            std::thread::id tid = std::this_thread::get_id();
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (!grad) {
+                grad = std::make_shared<Tensor>(std::vector<float>(data.size(), 0.0f), shape, false);
+            }
+            thread_gradients[tid] = grad;
+        }
     }
 
     /* backward function */
@@ -93,11 +109,11 @@ public:
     /* matrix multiplication */
     Tensor matmul(const Tensor &other) const;
     /* sum over given dimension */
-    Tensor sum(size_t dim) const;
+    Tensor sum(const size_t dim) const;
     /* sum over trailing dimension */
     Tensor sum() const;
     /* mean over given dimension */
-    Tensor mean(size_t dim) const;
+    Tensor mean(const size_t dim) const;
     /* mean over trailing dimension */
     Tensor mean() const;
     /* exp tensor */
@@ -144,7 +160,7 @@ public:
     /* helper function to print a tensor */
     void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const; 
     /* helper function returning the gradient tensor */
-    Tensor get_grad() const;
+    Tensor grad() const;
     /* disable gradient computation */
     void eval();
     /* enable gradient computation */

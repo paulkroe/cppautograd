@@ -22,8 +22,8 @@ void multidim_test(const std::string& test_name,
     c_torch.backward();
     
     ASSERT_TRUE(compare_tensors(c_cpp.data, c_torch, test_name + " Result"));
-    ASSERT_TRUE(compare_tensors(a_cpp.grad->data, a_torch.grad(), test_name + " Gradient (a)"));
-    ASSERT_TRUE(compare_tensors(b_cpp.grad->data, b_torch.grad(), test_name + " Gradient (b)"));
+    ASSERT_TRUE(compare_tensors(a_cpp.grad().data, a_torch.grad(), test_name + " Gradient (a)"));
+    ASSERT_TRUE(compare_tensors(b_cpp.grad().data, b_torch.grad(), test_name + " Gradient (b)"));
 }
 
 void multidim_test(const std::string& test_name,
@@ -52,7 +52,7 @@ void multidim_test(const std::string& test_name,
     d_torch.backward();
     
     ASSERT_TRUE(compare_tensors(d_cpp.data, d_torch, test_name + " Result"));
-    ASSERT_TRUE(compare_tensors(a_cpp.grad->data, a_torch.grad(), test_name + " Gradient (a)"));
-    ASSERT_TRUE(compare_tensors(b_cpp.grad->data, b_torch.grad(), test_name + " Gradient (b)"));
-    ASSERT_TRUE(compare_tensors(c_cpp.grad->data, c_torch.grad(), test_name + " Gradient (c)"));
+    ASSERT_TRUE(compare_tensors(a_cpp.grad().data, a_torch.grad(), test_name + " Gradient (a)"));
+    ASSERT_TRUE(compare_tensors(b_cpp.grad().data, b_torch.grad(), test_name + " Gradient (b)"));
+    ASSERT_TRUE(compare_tensors(c_cpp.grad().data, c_torch.grad(), test_name + " Gradient (c)"));
 }

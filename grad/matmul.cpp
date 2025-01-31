@@ -120,7 +120,7 @@ void matmul_transposed_tiled(const std::vector<float>& A,
  * n_threads: number of threads to use
  */
 Tensor Tensor::matmul(const Tensor &other) const {
-    size_t num_threads = 1;
+    
     /* ensure that both tensors have at least two dimensions */
     if (shape.size() < 2 || other.shape.size() < 2) {
         throw std::invalid_argument(
@@ -209,10 +209,6 @@ Tensor Tensor::matmul(const Tensor &other) const {
         auto this_requires_grad  = requires_grad;
         auto other_requires_grad = other.requires_grad;
 
-        auto this_grad          = this->grad;
-        auto other_grad         = other.grad;
-        auto result_grad        = result->grad;
-
         auto A_data             = data;
         auto B_data             = other.data;
 
@@ -228,21 +224,50 @@ Tensor Tensor::matmul(const Tensor &other) const {
         size_t nn = n;
         size_t pp = p;
 
-        /* insert result into the computation graph */
-        if (this_requires_grad)
-            result->parents.push_back(std::make_shared<Tensor>(*this));
-        if (other_requires_grad)
-            result->parents.push_back(std::make_shared<Tensor>(other));
+         std::thread::id tid = std::this_thread::get_id();
+
+        /* Store parents in a thread-safe manner */
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            if (this_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(*this));
+        }
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            if (other_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(other));
+        }
+        
+        /* Ensure thread-local gradients are initialized */
+        std::shared_ptr<Tensor> this_grad, other_grad;
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (this_requires_grad) {
+                if (!this->thread_gradients[tid]) {
+                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this->shape, false);
+                }
+                this_grad = this->thread_gradients[tid];
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (other_requires_grad) {
+                if (!other.thread_gradients[tid]) {
+                    other.thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(other.data.size(), 0.0f), other.shape, false);
+                }
+                other_grad = other.thread_gradients[tid];
+            }
+        }
 
         result->backward_fn = [
             this_requires_grad, other_requires_grad,
             this_grad, other_grad,
-            result_grad, A_data, B_data,
+            result, A_data, B_data,
             this_backward_fn, other_backward_fn,
             saved_this_shape, saved_other_shape, saved_result_shape,
             saved_batch_shape, mm, nn, pp
         ]() {
-            size_t num_threads = 1;
+
+            std::thread::id tid = std::this_thread::get_id();
+
             /* compute number of batches */
             size_t batch_size = 1;
             for (auto d : saved_batch_shape) {
@@ -262,7 +287,7 @@ Tensor Tensor::matmul(const Tensor &other) const {
             }
             /* dA = dC * B^T */
             if (this_requires_grad && this_grad) {
-                matmul_transposed_tiled(result_grad->data, saved_result_shape, 
+                matmul_transposed_tiled(result->thread_gradients[tid]->data, saved_result_shape, 
                                     B_data, saved_other_shape, 
                                     this_grad->data, saved_this_shape, 
                                     saved_batch_shape,
@@ -274,7 +299,7 @@ Tensor Tensor::matmul(const Tensor &other) const {
             /* dB = A^T * dC */
             if (other_requires_grad && other_grad) {
                 matmul_transposed_tiled(A_data, saved_this_shape, 
-                                    result_grad->data, saved_result_shape, 
+                                    result->thread_gradients[tid]->data, saved_result_shape, 
                                     other_grad->data, saved_other_shape, 
                                     saved_batch_shape,
                                     A_offsets, C_offsets, B_offsets,

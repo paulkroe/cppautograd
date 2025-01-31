@@ -14,7 +14,7 @@ void reduction_test(const std::string& test_name,
     
     /* compare_tensors tensors needed here because we need to compare gradients as well */
     ASSERT_TRUE(compare_tensors(c_cpp.data, c_torch, test_name + " Result"));
-    ASSERT_TRUE(compare_tensors(a_cpp.grad->data, a_torch.grad(), test_name + " Gradient (a)"));
+    ASSERT_TRUE(compare_tensors(a_cpp.grad().data, a_torch.grad(), test_name + " Gradient (a)"));
 }
 
 void reduction_test(const std::string& test_name, 
@@ -34,5 +34,5 @@ void reduction_test(const std::string& test_name,
     
     /* compare_tensors tensors needed here because we need to compare gradients as well */
     ASSERT_TRUE(compare_tensors(c_cpp.data, c_torch, test_name + " Result"));
-    ASSERT_TRUE(compare_tensors(a_cpp.grad->data, a_torch.grad(), test_name + " Gradient (a)"));
+    ASSERT_TRUE(compare_tensors(a_cpp.grad().data, a_torch.grad(), test_name + " Gradient (a)"));
 }

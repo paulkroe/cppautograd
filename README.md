@@ -100,4 +100,5 @@ std::cout << "Gradient of small: " << small.get_grad() << "\n";
 ## Design Choices
 - Make no difference when broadcasting
 - Tensors having unique IDs
+- using make_shared(*this) copies data instead of creating a ref
 - Backpropagation should be performed using topological sorting

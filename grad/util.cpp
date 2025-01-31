@@ -2,6 +2,9 @@
 std::atomic<std::uint8_t> id_counter = 0;
 std::mt19937 global_generator(42);
 
+std::mutex Tensor::GLOBAL_GRAD_MUTEX;
+std::mutex Tensor::GLOBAL_PARENTS_MUTEX;
+
 /* helper function to get tensor id*/
 size_t get_id() {
     return id_counter++;
@@ -14,8 +17,9 @@ void set_seed(int seed) {
 
 /* helper function zeroing out the gradient */
 void Tensor::zero_grad() {
-    if (grad) {
-        std::fill(grad->data.begin(), grad->data.end(), 0.0f);
+    std::thread::id tid = std::this_thread::get_id();
+    if (thread_gradients[tid]) {
+        std::fill(thread_gradients[tid]->data.begin(), thread_gradients[tid]->data.end(), 0.0f);
     }
 }
 
@@ -162,11 +166,12 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
 /*
  * helper function returning the gradient tensor
  */
-Tensor Tensor::get_grad() const{
-    if (!grad) {
+Tensor Tensor::grad() const{
+    std::thread::id tid = std::this_thread::get_id();
+    if (!thread_gradients[tid]) {
         throw std::runtime_error("Tensor has no gradient.");
     }
-    return *(grad.get());
+    return *(thread_gradients[tid].get());
 }
 
 /* 

@@ -159,10 +159,10 @@ void train(const size_t num_threads = 1) {
                 /* Update weights */
                 for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
                     for (size_t i = 0; i < layer->weight.data.size(); i++) {
-                        layer->weight.data[i] -= 0.1 * layer->weight.grad->data[i];
+                        layer->weight.data[i] -= 0.1 * layer->weight.grad().data[i];
                     }
                     for (size_t i = 0; i < layer->bias.data.size(); i++) {
-                        layer->bias.data[i] -= 0.1 * layer->bias.grad->data[i];
+                        layer->bias.data[i] -= 0.1 * layer->bias.grad().data[i];
                     }
                     layer->weight.zero_grad();
                     layer->bias.zero_grad();

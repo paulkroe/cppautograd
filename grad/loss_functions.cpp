@@ -10,7 +10,7 @@ Tensor Tensor::softmax(size_t dim) const {
     Tensor sum_exp = exp_tensor.sum(dim) + Tensor({1e-6}, {1}); /* Add a small epsilon to avoid division by zero */
     
     /* add trailing dimension for broadcasting */
-    sum_exp.shape.push_back(1);
+    sum_exp.shape.insert(sum_exp.shape.begin() + dim, 1);
 
     return exp_tensor / sum_exp;
 }
@@ -63,34 +63,47 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
          * to avoid dangling references
          */
         auto this_requires_grad = this->requires_grad;
-        auto this_grad = this->grad;
-        auto result_grad = result->grad;
         auto this_data = this->data;
         auto this_shape = this->shape;
         auto this_backward_fn = this->backward_fn;
 
-        /* insert result into the computation graph */
-        if (this_requires_grad)
-            result->parents.push_back(std::make_shared<Tensor>(*this));
+        std::thread::id tid = std::this_thread::get_id();
 
+        /* Store parents in a thread-safe manner */
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            if (this_requires_grad) result->parents[tid].insert(std::make_shared<Tensor>(*this));
+        }
+        
+        /* Ensure thread-local gradients are initialized */
+        std::shared_ptr<Tensor> this_grad;
+        {
+            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            if (this_requires_grad) {
+                if (!this->thread_gradients[tid]) {
+                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this_shape, false);
+                }
+                this_grad = this->thread_gradients[tid];
+            }
+        }
         result->backward_fn = [
             this_requires_grad, this_grad,
-            result_grad, this_data, this_shape,
+            result, this_data, this_shape,
             result_shape, num_classes
         ]() {
 
-            if (this_requires_grad && this_grad) {
-                for (size_t i = 0; i < this_data.size(); ++i) {
-                    /* compute the multi-dimensional index in this->shape */
-                    std::vector<size_t> multi_index = unravel_index(i, this_shape);
-                    
-                    /* iterate over classes and propagrate the gradient */
-                    multi_index.push_back(0);
-                    for (size_t j = 0; j < num_classes; ++j) {
-                        multi_index[this_shape.size() - 1] = j;
-                        size_t index = ravel_index(multi_index, result_shape);
-                        this_grad->data[i] += result_grad->data[index];
-                    }
+            std::thread::id tid = std::this_thread::get_id();
+
+            for (size_t i = 0; i < this_data.size(); ++i) {
+                /* compute the multi-dimensional index in this->shape */
+                std::vector<size_t> multi_index = unravel_index(i, this_shape);
+                
+                /* iterate over classes and propagrate the gradient */
+                multi_index.push_back(0);
+                for (size_t j = 0; j < num_classes; ++j) {
+                    multi_index[this_shape.size() - 1] = j;
+                    size_t index = ravel_index(multi_index, result_shape);
+                    this_grad->data[i] += result->thread_gradients[tid]->data[index];
                 }
             }
         };

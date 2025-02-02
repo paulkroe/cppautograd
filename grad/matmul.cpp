@@ -1,17 +1,22 @@
 #include "cppgrad.h"
 size_t TILE_SIZE = 32;
-/* tiled matrix multiplication */
-/* we are using row major order */
-/* for efficient memory access it makes more sense to process rows than columns */
+/* tiled matrix multiplication
+ * we are using row major order
+ * for efficient memory access it makes more sense to process rows than columns
+ */
 void matmul_tiled(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C,
-                            size_t m, size_t n, size_t p,
-                            size_t batch_size,
-                            const std::vector<size_t>& A_offsets, const std::vector<size_t>& B_offsets, const std::vector<size_t>& C_offsets) {
+                  size_t m, size_t n, size_t p,
+                  size_t batch_size,
+                  const std::vector<size_t>& A_offsets, const std::vector<size_t>& B_offsets, const std::vector<size_t>& C_offsets) {
 
     for (size_t b = 0; b < batch_size; ++b) {
         size_t A_offset = A_offsets[b];
         size_t B_offset = B_offsets[b];
         size_t C_offset = C_offsets[b];
+
+        const float* A_ptr = A.data() + A_offset;
+        const float* B_ptr = B.data() + B_offset;
+        float* C_ptr = C.data() + C_offset;
 
         for (size_t i = 0; i < m; i += TILE_SIZE) {
             size_t i_end = std::min(i + TILE_SIZE, m);
@@ -24,12 +29,18 @@ void matmul_tiled(const std::vector<float>& A, const std::vector<float>& B, std:
 
                     /* Compute small tiles */
                     for (size_t ii = i; ii < i_end; ++ii) {
+                        float* C_row = C_ptr + ii * p;  // Pointer to C[ii, *]
+                        const float* A_row = A_ptr + ii * n;  // Pointer to A[ii, *]
+
                         for (size_t jj = j; jj < j_end; ++jj) {
                             float sum = 0.0f;
+                            float* C_cell = C_row + jj;  // Pointer to C[ii, jj]
+                            
                             for (size_t kk = k; kk < k_end; ++kk) {
-                                sum += A[A_offset + ii * n + kk] * B[B_offset + kk * p + jj];
+                                sum += A_row[kk] * B_ptr[kk * p + jj];  // A[ii, kk] * B[kk, jj]
                             }
-                            C[C_offset + ii * p + jj] += sum;
+
+                            *C_cell += sum;  // C[ii, jj] += sum
                         }
                     }
                 }
@@ -37,8 +48,11 @@ void matmul_tiled(const std::vector<float>& A, const std::vector<float>& B, std:
         }
     }
 }
+
+
 /*
- *todo
+ * todo relpace [] operator with direct pointer access
+ * Matrix multiplication where either A or B is transposed
  */
 void matmul_transposed_tiled(const std::vector<float>& A, 
                                       const std::vector<size_t>& A_shape,
@@ -192,14 +206,11 @@ Tensor Tensor::matmul(const Tensor &other) const {
         other_offsets[b] = ravel_index(batch_index, std::vector<size_t>(other.shape.begin(), other.shape.end() - 2)) * n * p;
         result_offsets[b] = b * (m * p);
     }
-
     matmul_tiled(this->data, other.data, result_data,
                             m, n, p, batch_size, 
                             this_offsets, other_offsets, result_offsets);
-
     /* construct backward function */
     std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, result_shape, requires_grad || other.requires_grad);
-
     /* construct backward function */
     if (result->requires_grad) {
         /*
@@ -275,7 +286,6 @@ Tensor Tensor::matmul(const Tensor &other) const {
             saved_this_shape, saved_other_shape, saved_result_shape,
             saved_batch_shape, mm, nn, pp
         ]() {
-
             std::thread::id tid = std::this_thread::get_id();
 
             /* compute number of batches */
@@ -316,8 +326,10 @@ Tensor Tensor::matmul(const Tensor &other) const {
                                     nn, mm, pp,
                                     true, false); // Transpose A, no transpose on dC
             }
-        };
 
+
+        };
+        
     }
 
     return *result;

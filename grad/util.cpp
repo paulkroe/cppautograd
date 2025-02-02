@@ -1,5 +1,5 @@
 #include "cppgrad.h"
-std::atomic<std::uint8_t> id_counter = 0;
+std::atomic<std::uint64_t> id_counter = 1;
 std::mt19937 global_generator(42);
 
 std::mutex Tensor::GLOBAL_GRAD_MUTEX;
@@ -7,7 +7,11 @@ std::mutex Tensor::GLOBAL_PARENTS_MUTEX;
 
 /* helper function to get tensor id*/
 size_t get_id() {
-    return id_counter++;
+    size_t counter = id_counter++;
+    if (counter == 0) {
+        throw std::runtime_error("Tensor ID counter overflow");
+    }
+    return counter;
 }
 
 /* helper function to set random seed */

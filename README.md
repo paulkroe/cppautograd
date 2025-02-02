@@ -4,25 +4,25 @@ Its syntax aims to mirror LibTorch.
 
 For some examples please see `grad/demo/` or the Tutorial section below.
 
-## Speedup
-speedup using multiple cpus:
-two areas of speedup:
-1) do the matrix multiplication on multiple cores
-2) distributed training
+## Optimization
+Removed usage of std::vector<float>::operator[](unsigned long) from matrix multiplication.
+Indexing into matrices, especailly during matmul is inefficient and using operator[] hurts cache performance. I.e. replace:
+```
+for (size_t i = 0; i < N; i++) {
+    result[i] = a[i] + b[i];
+}
+```
+by
+```
+float* res_ptr = result.data();
+const float* a_ptr = a.data();
+const float* b_ptr = b.data();
 
-WIP: parallelization on multiple cores, adding a CUDA kernel
-
-plan of action:
-first make matmul more efficient than just the most naive implementation
-then make matmul backprop more efficient as well
-add support for multiple threads to backward
-(Strassen algorithm)
-
-then add multithreadding support to other operators as well (not sure if they are beneficial)
-
-then measure duration of training both with and without acceleration
-
-after doing that, split training into batches and experiement what is the fastest
+for (size_t i = 0; i < N; i++) {
+    *res_ptr++ = *a_ptr++ + *b_ptr++;
+}
+```
+Fetching gradients instead of calling grad() when updating gradients.  (calling grad took as much as 5% of the overall training time)
 
 ## Tutorial
 

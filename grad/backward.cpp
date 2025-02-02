@@ -8,76 +8,78 @@
 std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
     std::thread::id tid = std::this_thread::get_id();
 
-    // Map from each node ID to its list of children
-    std::unordered_map<size_t, std::vector<size_t>> children;
+    // 1. Gather the graph by traversing from root up to all parents
+    std::unordered_map<size_t, std::vector<size_t>> children;  // parent -> list of child IDs
     std::set<size_t> visited;
     std::queue<Tensor*> to_visit;
 
-    // Initialize the queue with the root node
     to_visit.push(&root);
-
-    // Track all nodes discovered in the first pass
     std::vector<Tensor*> all_nodes;
 
     while (!to_visit.empty()) {
         Tensor* curr = to_visit.front();
         to_visit.pop();
 
-        // Skip if already visited
         if (visited.count(curr->id)) {
             continue;
         }
         visited.insert(curr->id);
-        all_nodes.push_back(curr); // Store all discovered nodes
+        all_nodes.push_back(curr);
 
-        // Iterate over parents and add to children map
         if (curr->parents.count(tid)) {
             for (auto& p : curr->parents[tid]) {
+                // p is a shared_ptr<Tensor>
                 children[p->id].push_back(curr->id);
-                to_visit.push(p.get());  // Convert shared_ptr to raw pointer
+                to_visit.push(p.get());
             }
         }
     }
 
-    // Second pass: topological order
-    std::set<size_t> visited_backwards;
-    std::map<size_t, std::function<void()>> order;
-    std::queue<Tensor*> to_visit_final;
-
-    // Add all discovered nodes (not just root)
+    // 2. Compute in-degrees of each node (how many children does each node have?)
+    //    The "children" map is:  parentID -> listOfChildIDs
+    std::unordered_map<size_t,int> in_degree;
+    // Initialize in_degree of every discovered node to 0
     for (Tensor* node : all_nodes) {
-        to_visit_final.push(node);
+        in_degree[node->id] = 0;
+    }
+    // Count the number of times each node appears as a child
+    for (auto& kv : children) {
+        for (auto& child_id : kv.second) {
+            in_degree[child_id]++;
+        }
     }
 
-    while (!to_visit_final.empty()) {
-        Tensor* curr = to_visit_final.front();
-        to_visit_final.pop();
-
-        // Skip if already visited
-        if (visited_backwards.count(curr->id)) {
-            continue;
+    // 3. Initialize a queue with all nodes that have in-degree = 0
+    std::queue<Tensor*> ready;
+    // For quick ID->pointer lookup:
+    std::unordered_map<size_t, Tensor*> id_to_tensor;
+    for (Tensor* node : all_nodes) {
+        id_to_tensor[node->id] = node;
+        if (in_degree[node->id] == 0) {
+            ready.push(node);
         }
+    }
 
-        // Check if all children have been processed
-        bool ready = true;
-        if (children.count(curr->id)) {  // Only check if this node has children
+    // 4. Pop from 'ready' and decrease the in-degree of children
+    std::map<size_t, std::function<void()>> topo_order;
+    while (!ready.empty()) {
+        Tensor* curr = ready.front();
+        ready.pop();
+
+        // Record the backward function in the topological order
+        topo_order[curr->id] = curr->backward_fn;
+
+        // For each child of curr, decrement the child's in-degree
+        if (children.count(curr->id)) {
             for (auto& child_id : children[curr->id]) {
-                if (visited_backwards.count(child_id) == 0) {
-                    ready = false;
-                    break;
+                if (--in_degree[child_id] == 0) {
+                    ready.push(id_to_tensor[child_id]);
                 }
             }
         }
-
-        if (ready) {
-            visited_backwards.insert(curr->id);
-            order[curr->id] = curr->backward_fn; // Store function
-        } else {
-            to_visit_final.push(curr);  // Retry later
-        }
     }
 
-    return order;
+    return topo_order;
 }
 
 /* 
@@ -118,7 +120,7 @@ void Tensor::backward() {
     }
 
     std::map<size_t, std::function<void()>> order = build_graph(*this);
-
+    
     for (auto it = order.rbegin(); it != order.rend(); ++it) {
         if (it->second)
             it->second(); // Call the stored backward function

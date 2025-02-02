@@ -15,7 +15,7 @@
 #include <unordered_set>
 
 /* global tensor id */
-extern std::atomic<std::uint8_t> id_counter;
+extern std::atomic<std::uint64_t> id_counter;
 /* helper function to get tensor id*/
 size_t get_id();
 
@@ -23,6 +23,7 @@ size_t get_id();
 extern std::mt19937 global_generator;
 /* helper function to set random seed */
 void set_seed(int seed);
+
 
 class Tensor {
 public:
@@ -41,7 +42,7 @@ public:
 
     /* constructor inferring tensor shape to be 1D */
     Tensor(const std::vector<float>& data, bool requires_grad = false)
-        : data(data), requires_grad(requires_grad) {
+        : data(data), requires_grad(requires_grad) { 
         shape = { data.size() };
         id = get_id();
 
@@ -52,7 +53,7 @@ public:
         }
     }
 
-    /* constructor creating a tensor with explicit shape, shape is checked */
+    /* constructor creating a tensor with explicit shape */
     Tensor(const std::vector<float>& data, const std::vector<size_t>& shape, bool requires_grad = false)
         : data(data), shape(shape), requires_grad(requires_grad) {
         /* check if shape matches */

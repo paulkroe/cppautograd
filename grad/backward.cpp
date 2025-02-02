@@ -11,13 +11,13 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
     // 1. Gather the graph by traversing from root up to all parents
     std::unordered_map<size_t, std::vector<size_t>> children;  // parent -> list of child IDs
     std::set<size_t> visited;
-    std::queue<Tensor*> to_visit;
+    std::queue<std::shared_ptr<TensorData>> to_visit;
 
-    to_visit.push(&root);
-    std::vector<Tensor*> all_nodes;
+    to_visit.push(root.ptr);
+    std::vector<std::shared_ptr<TensorData>> all_nodes;
 
     while (!to_visit.empty()) {
-        Tensor* curr = to_visit.front();
+        auto curr = to_visit.front();
         to_visit.pop();
 
         if (visited.count(curr->id)) {
@@ -30,7 +30,7 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
             for (auto& p : curr->parents[tid]) {
                 // p is a shared_ptr<Tensor>
                 children[p->id].push_back(curr->id);
-                to_visit.push(p.get());
+                to_visit.push(p);
             }
         }
     }
@@ -39,7 +39,7 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
     //    The "children" map is:  parentID -> listOfChildIDs
     std::unordered_map<size_t,int> in_degree;
     // Initialize in_degree of every discovered node to 0
-    for (Tensor* node : all_nodes) {
+    for (auto node : all_nodes) {
         in_degree[node->id] = 0;
     }
     // Count the number of times each node appears as a child
@@ -50,10 +50,10 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
     }
 
     // 3. Initialize a queue with all nodes that have in-degree = 0
-    std::queue<Tensor*> ready;
+    std::queue<std::shared_ptr<TensorData>> ready;
     // For quick ID->pointer lookup:
-    std::unordered_map<size_t, Tensor*> id_to_tensor;
-    for (Tensor* node : all_nodes) {
+    std::unordered_map<size_t, std::shared_ptr<TensorData>> id_to_tensor;
+    for (auto node : all_nodes) {
         id_to_tensor[node->id] = node;
         if (in_degree[node->id] == 0) {
             ready.push(node);
@@ -63,7 +63,7 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
     // 4. Pop from 'ready' and decrease the in-degree of children
     std::map<size_t, std::function<void()>> topo_order;
     while (!ready.empty()) {
-        Tensor* curr = ready.front();
+        auto curr = ready.front();
         ready.pop();
 
         // Record the backward function in the topological order
@@ -94,10 +94,10 @@ std::map<size_t, std::function<void()>> build_graph(Tensor& root) {
  *     d. push parent nodes onto the stack
  */
 void Tensor::backward() {
-    if (this->numel(shape) != 1) {
+    if (numel(ptr->shape) != 1) {
         throw std::runtime_error("backward() only supported for scalar outputs");
     }
-    if (!requires_grad) {
+    if (!ptr->requires_grad) {
         throw std::runtime_error("Tensor does not require gradients");
     }
 
@@ -105,16 +105,16 @@ void Tensor::backward() {
     
     // Initialize *this* gradient to 1.0 for the backward start
     {
-        std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
-        if (!this->thread_gradients[tid]) {
-            this->thread_gradients[tid] = std::make_shared<Tensor>(
-                std::vector<float>(this->data.size(), 1.0f),
-                this->shape, /*requires_grad=*/false
+        std::lock_guard<std::mutex> lock(TensorData::GLOBAL_GRAD_MUTEX);
+        if (!ptr->thread_gradients[tid]) {
+                ptr->thread_gradients[tid] = std::make_shared<TensorData>(
+                std::vector<float>(ptr->data.size(), 1.0f),
+                ptr->shape, /*requires_grad=*/false
             );
         } else {
             // If gradient memory is already allocated, fill with 1.0
-            std::fill(this->thread_gradients[tid]->data.begin(),
-                      this->thread_gradients[tid]->data.end(),
+            std::fill(ptr->thread_gradients[tid]->data.begin(),
+                      ptr->thread_gradients[tid]->data.end(),
                       1.0f);
         }
     }

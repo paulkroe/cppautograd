@@ -16,6 +16,22 @@ find_package(Torch REQUIRED)
 # Set project root directory
 set(PROJECT_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# Add options for profiling
+option(ENABLE_GPROF "Enable gprof profiling" OFF)
+option(ENABLE_VALGRIND "Enable Valgrind memory debugging" OFF)
+
+# Add profiling compiler flags
+if (ENABLE_GPROF)
+    message(STATUS "Enabling gprof profiling")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")
+endif()
+
+if (ENABLE_VALGRIND)
+    message(STATUS "Enabling Valgrind debugging")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")  # Disable optimizations for better Valgrind analysis
+endif()
+
 # Add the library
 add_library(cppgrad STATIC ${PROJECT_ROOT_DIR}/grad/operator_overloads.cpp
                            ${PROJECT_ROOT_DIR}/grad/backward.cpp
@@ -50,6 +66,11 @@ add_executable(digit_classification ${PROJECT_ROOT_DIR}/demo/digit_classificatio
 target_link_libraries(digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(digit_classification PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/demo)
 
+# Add the test executable for multi-threaded digit classification
+add_executable(multithreadding_digit_classification ${PROJECT_ROOT_DIR}/demo/multithreadding_digit_classification.cpp)
+target_link_libraries(multithreadding_digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
+target_include_directories(multithreadding_digit_classification PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/demo)
+
 # Add the tutorial executable
 add_executable(tutorial ${PROJECT_ROOT_DIR}/demo/tutorial.cpp)
 target_link_libraries(tutorial PRIVATE cppgrad "${TORCH_LIBRARIES}")
@@ -63,3 +84,18 @@ target_include_directories(eval PRIVATE performance_eval)
 
 # Set flags for LibTorch
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+
+# Custom target for gprof profiling
+add_custom_target(profile_gprof
+    COMMAND cmake --build . --target digit_classification
+    COMMAND ./digit_classification
+    COMMAND gprof ./digit_classification gmon.out > gprof_report.txt
+    COMMENT "Running gprof profiling..."
+)
+
+# Custom target for Valgrind memory profiling
+add_custom_target(profile_valgrind
+    COMMAND cmake --build . --target digit_classification
+    COMMAND valgrind --leak-check=full --show-leak-kinds=all --log-file=valgrind_report.txt ./digit_classification
+    COMMENT "Running Valgrind profiling..."
+)

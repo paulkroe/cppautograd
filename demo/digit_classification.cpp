@@ -67,7 +67,9 @@ public:
 };
 
 void train(const size_t num_threads = 1) {
-    const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    // TODO:
+    // const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    const std::string train_path = "../../demo/data/archive/mnist_test.csv";
     const std::string test_path = "../../demo/data/archive/mnist_test.csv";
     
     /* Define the model */
@@ -150,11 +152,11 @@ void train(const size_t num_threads = 1) {
                 loss.backward();
 
                 /* Print loss with epoch and batch progress */
-                if (batch_idx % 500 == 0) {
+                //if (batch_idx % 500 == 0) {
                 std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
                         << "Batch [" << (batch_idx + 1) << "/" << num_batches_train << "] "
                         << "Loss: " << loss.data[0] << std::endl;
-                }
+                //}
 
                 /* Update weights */
                 for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
@@ -253,14 +255,8 @@ void train(const size_t num_threads = 1) {
 }
 
 int main() {
-    train();
     float time = 0.0f;
-    std::vector<int> num_threads = {1, 2, 4, 8};
-    
-    for (auto t: num_threads) {
-        time += ExecutionTimer::measure("train", [t]() {      train(t);    });
-        std::cout << "=========================================================" << std::endl;
-        std::cout << "Average time for training with " << t << " threads: " << time << " ms" << std::endl;
-        time = 0.0f;
-    }
+    time += ExecutionTimer::measure("train", []() {      train();    });
+    std::cout << "=========================================================" << std::endl;
+    std::cout << "Training time: " << time << " ms" << std::endl;
 }

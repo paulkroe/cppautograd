@@ -10,6 +10,15 @@
 #include "../grad/modules.h"
 #include "../performance_evals/timer.h"
 
+#define TIME_IT(code_block, label) {\
+    auto start = std::chrono::high_resolution_clock::now(); \
+    code_block \
+    auto end = std::chrono::high_resolution_clock::now(); \
+    std::cout << label << " took: " \
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() \
+              << " ms" << std::endl; \
+}
+
 class MNISTDataset : public torch::data::datasets::Dataset<MNISTDataset> {
     std::vector<torch::Tensor> images_;
     std::vector<torch::Tensor> labels_;
@@ -68,7 +77,7 @@ public:
 
 void train(const size_t num_threads = 1) {
     // TODO:
-    // const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    //const std::string train_path = "../../demo/data/archive/mnist_train.csv";
     const std::string train_path = "../../demo/data/archive/mnist_test.csv";
     const std::string test_path = "../../demo/data/archive/mnist_test.csv";
     
@@ -133,12 +142,12 @@ void train(const size_t num_threads = 1) {
                     labels.data_ptr<float>(),
                     labels_vec.size() * sizeof(float)
                 );
-
+                Tensor loss = Tensor({0.0f}, {1}, false);
                 /* Perform forward pass */
                 Tensor x = Tensor(images_vec, {16, 784}, false);
                 Tensor y = Tensor(labels_vec, {16}, false);
-                
-                Tensor y_pred = linear5.forward(
+                TIME_IT({
+                    Tensor y_pred = linear5.forward(
                                             linear4.forward(
                                                     linear3.forward(
                                                             linear2.forward(
@@ -148,32 +157,35 @@ void train(const size_t num_threads = 1) {
                                             )
                                     );
 
-                Tensor loss = CrossEntropyLoss(y_pred, y);
-                loss.backward();
-
-                /* Print loss with epoch and batch progress */
-                //if (batch_idx % 500 == 0) {
+                    loss = CrossEntropyLoss(y_pred, y);
+                
+                    loss.backward();
+                }, "Forward + Backward Pass");
+                
                 std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
                         << "Batch [" << (batch_idx + 1) << "/" << num_batches_train << "] "
                         << "Loss: " << loss.data[0] << std::endl;
-                //}
 
+                TIME_IT({
                 /* Update weights */
                 for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
-                    for (size_t i = 0; i < layer->weight.data.size(); i++) {
-                        layer->weight.data[i] -= 0.1 * layer->weight.grad().data[i];
+                    auto grad_weight = layer->weight.grad();
+                    for (size_t i = 0; i < grad_weight.data.size(); i++) {
+                        layer->weight.data[i] -= 0.1 * grad_weight.data[i];
                     }
-                    for (size_t i = 0; i < layer->bias.data.size(); i++) {
-                        layer->bias.data[i] -= 0.1 * layer->bias.grad().data[i];
+                    auto grad_bias = layer->bias.grad();
+                    for (size_t i = 0; i < grad_bias.data.size(); i++) {
+                        layer->bias.data[i] -= 0.1 * grad_bias.data[i];
                     }
                     layer->weight.zero_grad();
                     layer->bias.zero_grad();
                 }
+                }, "Weight Update");
 
                 batch_idx++;
             }
         }
-
+        return;
 
         /* EVALUATION PHASE */
         for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {

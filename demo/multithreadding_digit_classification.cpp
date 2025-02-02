@@ -4,11 +4,24 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
-#include <vector>
 #include <unordered_map>
 #include "../grad/cppgrad.h"
 #include "../grad/modules.h"
 #include "../performance_evals/timer.h"
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <numeric>
+#include <chrono>
+
+#define TIME_IT(code_block, label) {\
+    auto start = std::chrono::high_resolution_clock::now(); \
+    code_block \
+    auto end = std::chrono::high_resolution_clock::now(); \
+    std::cout << label << " took: " \
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() \
+              << " ms" << std::endl; \
+}
 
 class MNISTDataset : public torch::data::datasets::Dataset<MNISTDataset> {
     std::vector<torch::Tensor> images_;
@@ -66,46 +79,48 @@ public:
     }
 };
 
-#include <iostream>
-#include <vector>
-#include <thread>
-#include <mutex>
-#include <numeric>
-
 std::mutex grad_mutex;
 std::vector<float> losses;
 
-void worker(Tensor x, Tensor y, Linear &linear1, Linear &linear2, Linear &linear3, Linear &linear4, Linear &linear5, size_t num_threads) {
-    Tensor y_pred = linear5.forward(
-                            linear4.forward(
-                                    linear3.forward(
-                                            linear2.forward(
-                                                    linear1.forward(x).relu()
-                                            ).relu()
-                                    ).relu()
-                            )
-                    );
+void worker(Tensor x, Tensor y, Linear &linear1, Linear &linear2, Linear &linear3, 
+            Linear &linear4, Linear &linear5, size_t num_threads) {
+    Tensor loss = Tensor({0}, {1}, false);
+    TIME_IT({
+        Tensor y_pred = linear5.forward(
+                                linear4.forward(
+                                        linear3.forward(
+                                                linear2.forward(
+                                                        linear1.forward(x).relu()
+                                                ).relu()
+                                        ).relu()
+                                )
+                        );
 
-    Tensor loss = CrossEntropyLoss(y_pred, y);
-    loss.backward();
-    
+        loss = CrossEntropyLoss(y_pred, y);
+        loss.backward();
+    }, "Worker Forward + Backward Pass");
+
     std::lock_guard<std::mutex> lock(grad_mutex);
     losses.push_back(loss.data[0]);
 
-    /* Update weights */
-    for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
-        for (size_t i = 0; i < layer->weight.data.size(); i++) {
-            layer->weight.data[i] -= 0.1 * layer->weight.grad().data[i] / num_threads;
+    TIME_IT({
+        /* Update weights */
+        for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
+            auto grad_weight = layer->weight.grad();
+            for (size_t i = 0; i < grad_weight.data.size(); i++) {
+                layer->weight.data[i] -= 0.1 * grad_weight.data[i] / num_threads;
+            }
+            auto grad_bias = layer->bias.grad();
+            for (size_t i = 0; i < grad_bias.data.size(); i++) {
+                layer->bias.data[i] -= 0.1 * grad_bias.data[i] / num_threads;
+            }
+            layer->weight.zero_grad();
+            layer->bias.zero_grad();
         }
-        for (size_t i = 0; i < layer->bias.data.size(); i++) {
-            layer->bias.data[i] -= 0.1 * layer->bias.grad().data[i] / num_threads;
-        }
-        layer->weight.zero_grad();
-        layer->bias.zero_grad();
-    }
+    }, "Weight Update");
 }
 
-void train(const size_t num_threads = 1) {
+void train(const size_t num_threads = 1, const size_t batch_size = 16) {
     //TODO
     //const std::string train_path = "../../demo/data/archive/mnist_train.csv";
     const std::string train_path = "../../demo/data/archive/mnist_test.csv";
@@ -120,7 +135,7 @@ void train(const size_t num_threads = 1) {
 
     try {
         /* Create Dataset and DataLoader */
-        auto options = torch::data::DataLoaderOptions().batch_size(16);
+        auto options = torch::data::DataLoaderOptions().batch_size(batch_size);
         
         auto dataset_train = MNISTDataset(train_path)
                            .map(torch::data::transforms::Normalize<>(0.0, 1.0))
@@ -146,7 +161,7 @@ void train(const size_t num_threads = 1) {
             while (batch_idx < num_batches_train) {
                 std::vector<std::thread> workers;
                 losses.clear();
-
+                
                 for (size_t t = 0; t < num_threads && batch_it != data_loader_train->end(); ++t, ++batch_it) {
                     auto& batch = *batch_it;
 
@@ -161,8 +176,8 @@ void train(const size_t num_threads = 1) {
                     std::vector<float> labels_vec(batch.target.numel());
                     std::memcpy(labels_vec.data(), batch.target.data_ptr<float>(), labels_vec.size() * sizeof(float));
 
-                    Tensor x = Tensor(images_vec, {16, 784}, false);
-                    Tensor y = Tensor(labels_vec, {16}, false);
+                    Tensor x = Tensor(images_vec, {batch_size, 784}, false);
+                    Tensor y = Tensor(labels_vec, {batch_size}, false);
 
                     workers.emplace_back(worker, x, y, std::ref(linear1), std::ref(linear2), std::ref(linear3), std::ref(linear4), std::ref(linear5), num_threads);
                 }
@@ -176,8 +191,11 @@ void train(const size_t num_threads = 1) {
                 std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
                           << "Batch [" << (batch_idx + 1) << "/" << num_batches_train << "] "
                           << "Loss: " << avg_loss << std::endl;
-
+                
                 batch_idx += num_threads;
+                if (batch_idx >  10) {
+                    return;
+                }
             }
         }
 
@@ -215,7 +233,7 @@ void train(const size_t num_threads = 1) {
             );
 
             /* Forward pass without gradient calculation */
-            Tensor x = Tensor(images_vec, {16, 784}, false);
+            Tensor x = Tensor(images_vec, {batch_size, 784}, false);
             Tensor y_pred = linear5.forward(
                                         linear4.forward(
                                                 linear3.forward(
@@ -260,12 +278,15 @@ void train(const size_t num_threads = 1) {
 
 int main() {
     float time = 0.0f;
-    std::vector<int> num_threads = {4};
+    std::vector<size_t> num_threads = {4};
+    std::vector<size_t > batch_sizes = {16};
     
+    for (auto b: batch_sizes){
     for (auto t: num_threads) {
-        time += ExecutionTimer::measure("train", [t]() {      train(t);    });
+        time += ExecutionTimer::measure("train", [t, b]() {      train(t, b);    });
         std::cout << "=========================================================" << std::endl;
-        std::cout << "Average time for training with " << t << " threads: " << time << " ms" << std::endl;
+        std::cout << "Average time for training with " << t << " threads and batch size " << b << ": " << time << " ms" << std::endl;
         time = 0.0f;
+    }
     }
 }

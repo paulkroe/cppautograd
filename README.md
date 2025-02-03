@@ -98,6 +98,7 @@ std::cout << "Gradient of small: " << small.get_grad() << "\n";
 ## Usage
 
 ## Design Choices
+- result_shape in backward function
 - Make no difference when broadcasting
 - Tensors having unique IDs
 - using make_shared(*this) copies data instead of creating a ref

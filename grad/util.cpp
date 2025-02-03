@@ -2,8 +2,8 @@
 std::atomic<std::uint64_t> id_counter = 1;
 std::mt19937 global_generator(42);
 
-std::mutex Tensor::GLOBAL_GRAD_MUTEX;
-std::mutex Tensor::GLOBAL_PARENTS_MUTEX;
+std::mutex TensorData::GLOBAL_GRAD_MUTEX;
+std::mutex TensorData::GLOBAL_PARENTS_MUTEX;
 
 /* helper function to get tensor id*/
 size_t get_id() {
@@ -22,13 +22,13 @@ void set_seed(int seed) {
 /* helper function zeroing out the gradient */
 void Tensor::zero_grad() {
     std::thread::id tid = std::this_thread::get_id();
-    if (thread_gradients[tid]) {
-        std::fill(thread_gradients[tid]->data.begin(), thread_gradients[tid]->data.end(), 0.0f);
+    if (ptr->thread_gradients[tid]) {
+        std::fill(ptr->thread_gradients[tid]->data.begin(), ptr->thread_gradients[tid]->data.end(), 0.0f);
     }
 }
 
 /* helper function to count the number of elements */
-size_t Tensor::numel(const std::vector<size_t>& shp) {
+size_t numel(const std::vector<size_t>& shp) {
     size_t product = 1;
     for (auto s : shp) {
         product *= s;
@@ -38,7 +38,7 @@ size_t Tensor::numel(const std::vector<size_t>& shp) {
 
 /* helper function to print the shape of a tensor */
 void Tensor::print_shape() const{
-    for (size_t s : shape) {
+    for (size_t s : ptr->shape) {
         std::cout << s << " ";
     }
     std::cout << std::endl;
@@ -131,7 +131,7 @@ std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape) 
 std::vector<float> reduce_grad(const std::vector<float>& grad, 
                                const std::vector<size_t>& grad_shape, 
                                const std::vector<size_t>& original_shape) {
-    std::vector<float> reduced_grad(Tensor::numel(original_shape), 0.0f);
+    std::vector<float> reduced_grad(numel(original_shape), 0.0f);
 
     for (size_t i = 0; i < grad.size(); ++i) {
         std::vector<size_t> multi_index = unravel_index(i, grad_shape);
@@ -168,25 +168,45 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
 }
 
 /*
+ * helper function returning the shape of a tensor 
+ */
+std::vector<size_t> Tensor::shape() const {
+    if(this->ptr == NULL){
+        return {};
+    }
+    return ptr->shape;
+}
+
+/*
+ * helper function returning the data of a tensor 
+ */
+std::vector<float> Tensor::data() const {
+    if(this->ptr == NULL){
+        return {};
+    }
+    return ptr->data;
+};
+
+/*
  * helper function returning the gradient tensor
  */
 Tensor Tensor::grad() const{
     std::thread::id tid = std::this_thread::get_id();
-    if (!thread_gradients[tid]) {
+    if (!ptr->thread_gradients[tid]) {
         throw std::runtime_error("Tensor has no gradient.");
     }
-    return *(thread_gradients[tid].get());
+    return Tensor(ptr->thread_gradients[tid]);
 }
 
 /* 
  * disable gradient computation
  */
 void Tensor::eval() {
-    requires_grad = false;
+    ptr->requires_grad = false;
 }
 /*
  * enable gradient computation
  */
 void Tensor::train() {
-    requires_grad = true;
+    ptr->requires_grad = true;
 }

@@ -10,13 +10,13 @@ void scalar_test(const std::string& test_name,
     Tensor c_cpp = cpp_op(a_cpp, b_cpp);
     c_cpp.backward();
 
-    auto a_torch = torch::from_blob(a_cpp.data.data(), {1}, torch::TensorOptions().dtype(torch::kFloat32)).clone().requires_grad_(true);
-    auto b_torch = torch::from_blob(b_cpp.data.data(), {1}, torch::TensorOptions().dtype(torch::kFloat32)).clone().requires_grad_(true);
+    auto a_torch = torch::from_blob(a_cpp.data().data(), {1}, torch::TensorOptions().dtype(torch::kFloat32)).clone().requires_grad_(true);
+    auto b_torch = torch::from_blob(b_cpp.data().data(), {1}, torch::TensorOptions().dtype(torch::kFloat32)).clone().requires_grad_(true);
 
     auto c_torch = torch_op(a_torch, b_torch);
     c_torch.backward();
     
-    ASSERT_TRUE(compare_scalars(c_cpp.data[0], c_torch.item<float>(), test_name + " Result"));
-    ASSERT_TRUE(compare_scalars(a_cpp.grad().data[0], a_torch.grad().item<float>(), test_name + " Gradient (a)"));
-    ASSERT_TRUE(compare_scalars(b_cpp.grad().data[0], b_torch.grad().item<float>(), test_name + " Gradient (b)"));
+    ASSERT_TRUE(compare_scalars(c_cpp.data()[0], c_torch.item<float>(), test_name + " Result"));
+    ASSERT_TRUE(compare_scalars(a_cpp.grad().data()[0], a_torch.grad().item<float>(), test_name + " Gradient (a)"));
+    ASSERT_TRUE(compare_scalars(b_cpp.grad().data()[0], b_torch.grad().item<float>(), test_name + " Gradient (b)"));
 }

@@ -6,66 +6,68 @@
  */
 Tensor Tensor::log() const {
     
+    auto this_shape = this->ptr->shape;
+    auto this_data = this->ptr->data;
+
+    auto this_requires_grad = this->ptr->requires_grad;
+
+
     /* take the logarithm */
-    std::vector<float> result_data(data.size());
-    for (size_t i = 0; i < data.size(); i++) {
-        result_data[i] = std::log(data[i]);
+    std::vector<float> result_data(this_data.size());
+    for (size_t i = 0; i < this_data.size(); i++) {
+        result_data[i] = std::log(this_data[i]);
     }
 
     /* construct result tensor */
-    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(result_data, shape, requires_grad);
+    Tensor result = Tensor(result_data, this_shape, this_requires_grad);
 
     /* construt backward function */
-    if (result->requires_grad) {
+    if (result.ptr->requires_grad) {
         
-        /*
-         * copy data necessary for backward function
-         * to avoid dangling references
-         */
-        auto this_requires_grad = this->requires_grad;
-        auto this_data    = this->data;
-        auto out_data     = result->data;
-
         std::thread::id tid = std::this_thread::get_id();
         
         /* add result to computation graph */
         {
-            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            std::lock_guard<std::mutex> lock(TensorData::GLOBAL_PARENTS_MUTEX);
             if (this_requires_grad) {
-                auto parent = std::make_shared<Tensor>(*this);
-                parent->id = id;
-                result->parents[tid].insert(parent);
+                result.ptr->parents[tid].insert(this->ptr);
             }
         }
 
         /* Ensure thread-local gradients are initialized */
-        std::shared_ptr<Tensor> this_grad, other_grad;
+        std::shared_ptr<TensorData> this_grad;
         {
-            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            std::lock_guard<std::mutex> lock(TensorData::GLOBAL_GRAD_MUTEX);
             if (this_requires_grad) {
-                if (!this->thread_gradients[tid]) {
-                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this->shape, false);
+                if (!this->ptr->thread_gradients[tid]) {
+                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this_data.size(), 0.0f), this_shape, false);
                 }
-                this_grad = this->thread_gradients[tid];
+                this_grad = this->ptr->thread_gradients[tid];
             }
         }
 
-        result->backward_fn = [
-            this_requires_grad, this_grad,
-            this_data, out_data, result
-        ]() {
+        result.ptr->backward_fn = [this_ptr = this->ptr, result_ptr = result.ptr]() {
 
             std::thread::id tid = std::this_thread::get_id();
 
-            if (this_requires_grad && this_grad) {
+            auto this_shape = this_ptr->shape;
+            auto result_shape = result_ptr->shape;
+
+            auto this_data = this_ptr->data;
+            auto result_data = result_ptr->data;
+
+            auto this_grad = this_ptr->thread_gradients[tid];
+            auto result_grad = result_ptr->thread_gradients[tid]->data;
+
+            if (this_ptr->requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
-                    this_grad->data[i] += result->thread_gradients[tid]->data[i] / this_data[i];
+                    this_grad->data[i] += result_grad[i] / this_data[i];
                 }
             }
         };
     }
 
-    return *result;
+    return result;
 }
 
 /* 
@@ -74,61 +76,63 @@ Tensor Tensor::log() const {
  */
 Tensor Tensor::exp() const{
 
+    auto this_shape = this->ptr->shape;
+    auto this_data = this->ptr->data;
+
+    auto this_requires_grad = this->ptr->requires_grad;
+
     /* take the logarithm */
-    std::vector<float> forward_data(data.size());
-    for (size_t i = 0; i < data.size(); i++) {
-        forward_data[i] = std::exp(data[i]);
+    std::vector<float> result_data(this_data.size());
+    for (size_t i = 0; i < this_data.size(); i++) {
+        result_data[i] = std::exp(this_data[i]);
     }
 
     /* construct result tensor */
-    std::shared_ptr<Tensor> result = std::make_shared<Tensor>(forward_data, shape, requires_grad);
+    Tensor result = Tensor(result_data, this_shape, this_requires_grad);
     
     /* construt backward function */
-    if (result->requires_grad) {
+    if (result.ptr->requires_grad) {
         
-        /*
-         * copy data necessary for backward function
-         * to avoid dangling references
-         */
-        auto this_requires_grad = this->requires_grad;
-        auto this_data    = this->data;
-
         std::thread::id tid = std::this_thread::get_id();
 
         /* add result to computation graph */
         {
-            std::lock_guard<std::mutex> lock(GLOBAL_PARENTS_MUTEX);
+            std::lock_guard<std::mutex> lock(TensorData::GLOBAL_PARENTS_MUTEX);
             if (this_requires_grad) {
-                auto parent = std::make_shared<Tensor>(*this);
-                parent->id = id;
-                result->parents[tid].insert(parent);
+                result.ptr->parents[tid].insert(this->ptr);
             }
 
         }
-        std::shared_ptr<Tensor> this_grad;
+        std::shared_ptr<TensorData> this_grad;
         {
-            std::lock_guard<std::mutex> lock(GLOBAL_GRAD_MUTEX);
+            std::lock_guard<std::mutex> lock(TensorData::GLOBAL_GRAD_MUTEX);
             if (this_requires_grad) {
-                if (!this->thread_gradients[tid]) {
-                    this->thread_gradients[tid] = std::make_shared<Tensor>(std::vector<float>(this->data.size(), 0.0f), this->shape, false);
+                if (!this->ptr->thread_gradients[tid]) {
+                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this_data.size(), 0.0f), this_shape, false);
                 }
-                this_grad = this->thread_gradients[tid];
+                this_grad = this->ptr->thread_gradients[tid];
             }
         }
 
-        result->backward_fn = [
-            this_requires_grad, this_grad,
-            this_data, result
-        ]() {
+        result.ptr->backward_fn = [this_ptr = this->ptr, result_ptr = result.ptr]() {
+
             std::thread::id tid = std::this_thread::get_id();
+
+            auto result_shape = result_ptr->shape;
+
+            auto this_data = this_ptr->data;
+            auto result_data = result_ptr->data;
+
+            auto this_grad = this_ptr->thread_gradients[tid];
+            auto result_grad = result_ptr->thread_gradients[tid]->data;
             
-            if (this_requires_grad && this_grad) {
+            if (this_ptr->requires_grad && this_grad) {
                 for (size_t i = 0; i < this_data.size(); i++) {
-                    this_grad->data[i] += result->thread_gradients[tid]->data[i] * result->data[i];
+                    this_grad->data[i] += result_grad[i] * result_data[i];
                 }
             }
         };
     }
 
-    return *result;
+    return result;
 }

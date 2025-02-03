@@ -83,7 +83,6 @@ public:
     /* constructor inferring tensor shape to be 1D */
     TensorData(const std::vector<float>& data, bool requires_grad = false)
         : data(data), requires_grad(requires_grad) { 
-            std::cout << "Creating tensor with explicit shape and gradient" << std::endl;
             shape = { data.size() };
             id = get_id();
 
@@ -97,7 +96,6 @@ public:
     /* constructor creating a tensor with explicit shape */
     TensorData(const std::vector<float>& data, const std::vector<size_t>& shape, bool requires_grad = false)
         : data(data), shape(shape), requires_grad(requires_grad) {
-            std::cout << "Creating tensor with explicit shape and gradient" << std::endl;
             /* check if shape matches */
             if (numel(shape) != data.size()) {
                 throw std::invalid_argument("Data size does not match shape.");
@@ -114,7 +112,6 @@ public:
     /* constructor creating a tensor with an explicit shape and gradient */
     TensorData(const std::vector<float>& data, const std::vector<size_t>& shape, bool requires_grad, std::shared_ptr<TensorData> grad)
         : data(data), shape(shape), requires_grad(requires_grad) {
-            std::cout << "Creating tensor with explicit shape and gradient" << std::endl;
             /* check if shape matches */
             if (numel(shape) != data.size()) {
                 throw std::invalid_argument("Data size does not match shape.");
@@ -161,70 +158,74 @@ class Tensor {
     /* binary addition operator */
     Tensor operator+(const Tensor& other) const;
     Tensor operator+(const float other) const;
-    // /* binary minus operator */
-    // Tensor operator-(const Tensor& other) const;
-    // Tensor operator-(const float other) const;
-    // /* unary minus operator */
-    // Tensor operator-() const;
+    /* binary minus operator */
+    Tensor operator-(const Tensor& other) const;
+    Tensor operator-(const float other) const;
+    /* unary minus operator */
+    Tensor operator-() const;
     /* elementwise multiplication operator */
     Tensor operator*(const Tensor& other) const;
     Tensor operator*(const float other) const;
     // /* elementwise division operator */
-    // Tensor operator/(const Tensor& other) const;
-    // Tensor operator/(const float other) const;
+    Tensor operator/(const Tensor& other) const;
+    Tensor operator/(const float other) const;
     /* overload the << operator */
     friend std::ostream& operator<<(std::ostream& os, const Tensor& tensor);
-    // /* matrix multiplication */
-    // Tensor matmul(const Tensor &other) const;
-    // /* sum over given dimension */
-    // Tensor sum(const size_t dim) const;
-    // /* sum over trailing dimension */
-    // Tensor sum() const;
-    // /* mean over given dimension */
-    // Tensor mean(const size_t dim) const;
-    // /* mean over trailing dimension */
-    // Tensor mean() const;
-    // /* exp tensor */
-    // Tensor exp() const;
-    // /* log tensor */
-    // Tensor log() const;
-    // /* softmax over dimension */
-    // Tensor softmax(size_t dim) const;
-    // /* softmax */
-    // Tensor softmax() const;
-    // /* one hot-encode */
-    // Tensor onehot_encode(size_t num_classes) const;
-    // /* activation function */
-    // Tensor relu() const;
+    /* matrix multiplication */
+    Tensor matmul(const Tensor &other) const;
+    /* sum over given dimension */
+    Tensor sum(const size_t dim) const;
+    /* sum over trailing dimension */
+    Tensor sum() const;
+    /* mean over given dimension */
+    Tensor mean(const size_t dim) const;
+    /* mean over trailing dimension */
+    Tensor mean() const;
+    /* exp tensor */
+    Tensor exp() const;
+    /* log tensor */
+    Tensor log() const;
+    /* softmax over dimension */
+    Tensor softmax(size_t dim) const;
+    /* softmax */
+    Tensor softmax() const;
+    /* one hot-encode */
+    Tensor onehot_encode(size_t num_classes) const;
+    /* activation function */
+    Tensor relu() const;
 
-    // /* initialization functions: */
+    /* initialization functions: */
 
-    // /* 
-    //  * initialize a random tensor
-    //  * each element is sampled from U[0, 1]
-    //  */
-    // static Tensor randn(const std::vector<size_t>& shape, bool requires_grad); 
+    /* 
+     * initialize a random tensor
+     * each element is sampled from U[0, 1]
+     */
+    static Tensor randn(const std::vector<size_t>& shape, bool requires_grad); 
 
-    // /*
-    //  * initialize a random tensor using He initialization
-    //  * sampled from a uniform distribution scaled by stddev.
-    //  */
-    // static Tensor randn_he(size_t in_features, size_t out_features, bool requires_grad);
+    /*
+     * initialize a random tensor using He initialization
+     * sampled from a uniform distribution scaled by stddev.
+     */
+    static Tensor randn_he(size_t in_features, size_t out_features, bool requires_grad);
         
-    // /*
-    //  * initialize a bias tensor with values sampled uniformly from [-bound, bound],
-    //  * where bound = 1 / sqrt(in_features), following PyTorch's bias initialization.
-    //  */
-    // static Tensor bias_uniform(size_t in_features, bool requires_grad);
+    /*
+     * initialize a bias tensor with values sampled uniformly from [-bound, bound],
+     * where bound = 1 / sqrt(in_features), following PyTorch's bias initialization.
+     */
+    static Tensor bias_uniform(size_t in_features, bool requires_grad);
 
     // /* helper functions: */
-    
+
     /* helper function zeroing out the gradient */
     void zero_grad();
     /* helper function to print the shape of a tensor */
     void print_shape() const; 
     /* helper function to print a tensor */
     void print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const; 
+    /* helper function returning the shape of a tensor */
+    std::vector<size_t> shape() const;
+    /* helper function returning the data of a tensor */
+    std::vector<float> data() const;
     /* helper function returning the gradient tensor */
     Tensor grad() const;
     /* disable gradient computation */

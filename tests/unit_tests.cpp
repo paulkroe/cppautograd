@@ -16,7 +16,7 @@ bool compare_scalars(float cpp_value, float torch_value, const std::string& test
 bool compare_tensors(const std::vector<float>& cpp_data, const torch::Tensor& torch_tensor, const std::string& test_name) {
     auto torch_data = torch_tensor.flatten().data_ptr<float>();
     for (size_t i = 0; i < cpp_data.size(); ++i) {
-        if (std::abs(cpp_data[i] - torch_data[i]) > 1e-3) {
+        if (std::abs(cpp_data[i] - torch_data[i]) > 1e-4) {
             std::cerr << test_name << " FAILED at index " << i << ": " << cpp_data[i] << " (cpp) vs " << torch_data[i] << " (torch).\n";
             std::cerr << "Difference: " << std::abs(cpp_data[i] - torch_data[i]) << std::endl;
             return false;
@@ -184,9 +184,9 @@ TEST(TensorTest, ManCrossEntropyLoss) {
         {3, 42},
         [](Tensor a) { 
             Tensor y_true({32, 10, 2}, {3}, false);
-            Tensor y_pred_softmax = a.softmax(a.shape.size() - 1);
-            Tensor y_true_one_hot = y_true.onehot_encode(a.shape.back());
-            Tensor neg_log_likelihood = -(y_true_one_hot * y_pred_softmax.log()).sum(a.shape.size() - 1);
+            Tensor y_pred_softmax = a.softmax(a.shape().size() - 1);
+            Tensor y_true_one_hot = y_true.onehot_encode(a.shape().back());
+            Tensor neg_log_likelihood = -(y_true_one_hot * y_pred_softmax.log()).sum(a.shape().size() - 1);
             return neg_log_likelihood.mean();
         },
         [](torch::Tensor a) {

@@ -101,29 +101,36 @@ void worker(Tensor x, Tensor y, Linear &linear1, Linear &linear2, Linear &linear
     }, "Worker Forward + Backward Pass");
 
     std::lock_guard<std::mutex> lock(grad_mutex);
-    losses.push_back(loss.data[0]);
+    losses.push_back(loss.data()[0]);
 
     TIME_IT({
         /* Update weights */
         for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
-            auto grad_weight = layer->weight.grad();
-            for (size_t i = 0; i < grad_weight.data.size(); i++) {
-                layer->weight.data[i] -= 0.1 * grad_weight.data[i] / num_threads;
+            auto& data_weight = layer->weight.ptr->data;
+            auto& grad_weight = layer->weight.grad().ptr->data;
+
+            for (size_t i = 0; i < grad_weight.size(); i++) {
+                data_weight[i] -= 0.1 * grad_weight[i]; // Modify real tensor
             }
-            auto grad_bias = layer->bias.grad();
-            for (size_t i = 0; i < grad_bias.data.size(); i++) {
-                layer->bias.data[i] -= 0.1 * grad_bias.data[i] / num_threads;
+
+            auto& data_bias = layer->bias.ptr->data;
+            auto& grad_bias = layer->bias.grad().ptr->data;
+
+            for (size_t i = 0; i < grad_bias.size(); i++) {
+                data_bias[i] -= 0.1 * grad_bias[i];
             }
+
             layer->weight.zero_grad();
             layer->bias.zero_grad();
-        }
+        }   
+
     }, "Weight Update");
 }
 
 void train(const size_t num_threads = 1, const size_t batch_size = 16) {
     //TODO
-    //const std::string train_path = "../../demo/data/archive/mnist_train.csv";
-    const std::string train_path = "../../demo/data/archive/mnist_test.csv";
+    const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    // const std::string train_path = "../../demo/data/archive/mnist_test.csv";
     const std::string test_path = "../../demo/data/archive/mnist_test.csv";
 
     /* Define the model */
@@ -176,8 +183,10 @@ void train(const size_t num_threads = 1, const size_t batch_size = 16) {
                     std::vector<float> labels_vec(batch.target.numel());
                     std::memcpy(labels_vec.data(), batch.target.data_ptr<float>(), labels_vec.size() * sizeof(float));
 
-                    Tensor x = Tensor(images_vec, {batch_size, 784}, false);
-                    Tensor y = Tensor(labels_vec, {batch_size}, false);
+                    size_t real_batch_size = batch.data.size(0);
+                    Tensor x = Tensor(images_vec, {real_batch_size, 784}, false);
+                    Tensor y = Tensor(labels_vec, {real_batch_size}, false);
+
 
                     workers.emplace_back(worker, x, y, std::ref(linear1), std::ref(linear2), std::ref(linear3), std::ref(linear4), std::ref(linear5), num_threads);
                 }
@@ -193,12 +202,9 @@ void train(const size_t num_threads = 1, const size_t batch_size = 16) {
                           << "Loss: " << avg_loss << std::endl;
                 
                 batch_idx += num_threads;
-                if (batch_idx >  10) {
-                    return;
-                }
             }
         }
-
+        std::cout << "============================<EVAL PHASE>============================" << std::endl;
         /* EVALUATION PHASE */
         for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
             layer->eval();
@@ -233,7 +239,9 @@ void train(const size_t num_threads = 1, const size_t batch_size = 16) {
             );
 
             /* Forward pass without gradient calculation */
-            Tensor x = Tensor(images_vec, {batch_size, 784}, false);
+            size_t real_batch_size = batch.data.size(0);
+            Tensor x = Tensor(images_vec, {real_batch_size, 784}, false);
+
             Tensor y_pred = linear5.forward(
                                         linear4.forward(
                                                 linear3.forward(
@@ -243,8 +251,9 @@ void train(const size_t num_threads = 1, const size_t batch_size = 16) {
                                                 ).relu()
                                         )
                                 );
-
-            std::vector<float> predictions(y_pred.data.begin(), y_pred.data.end());
+            size_t pred_size = y_pred.data().size();
+            std::vector<float> predictions(pred_size);
+            std::memcpy(predictions.data(), y_pred.data().data(), pred_size * sizeof(float));
 
             /* Convert softmax output to class prediction */
             for (size_t i = 0; i < labels_vec.size(); i++) {
@@ -279,7 +288,7 @@ void train(const size_t num_threads = 1, const size_t batch_size = 16) {
 int main() {
     float time = 0.0f;
     std::vector<size_t> num_threads = {4};
-    std::vector<size_t > batch_sizes = {16};
+    std::vector<size_t > batch_sizes = {32};
     
     for (auto b: batch_sizes){
     for (auto t: num_threads) {

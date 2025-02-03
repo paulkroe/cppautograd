@@ -168,6 +168,26 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
 }
 
 /*
+ * helper function returning the shape of a tensor 
+ */
+std::vector<size_t> Tensor::shape() const {
+    if(this->ptr == NULL){
+        return {};
+    }
+    return ptr->shape;
+}
+
+/*
+ * helper function returning the data of a tensor 
+ */
+std::vector<float> Tensor::data() const {
+    if(this->ptr == NULL){
+        return {};
+    }
+    return ptr->data;
+};
+
+/*
  * helper function returning the gradient tensor
  */
 Tensor Tensor::grad() const{

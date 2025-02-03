@@ -76,9 +76,8 @@ public:
 };
 
 void train(const size_t num_threads = 1) {
-    // TODO:
-    //const std::string train_path = "../../demo/data/archive/mnist_train.csv";
-    const std::string train_path = "../../demo/data/archive/mnist_test.csv";
+    const std::string train_path = "../../demo/data/archive/mnist_train.csv";
+    // const std::string train_path = "../../demo/data/archive/mnist_test.csv";
     const std::string test_path = "../../demo/data/archive/mnist_test.csv";
     
     /* Define the model */
@@ -164,29 +163,36 @@ void train(const size_t num_threads = 1) {
                 
                 std::cout << "Epoch [" << (epoch + 1) << "/" << num_epochs << "] "
                         << "Batch [" << (batch_idx + 1) << "/" << num_batches_train << "] "
-                        << "Loss: " << loss.data[0] << std::endl;
+                        << "Loss: " << loss.data()[0] << std::endl;
 
                 TIME_IT({
-                /* Update weights */
-                for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
-                    auto grad_weight = layer->weight.grad();
-                    for (size_t i = 0; i < grad_weight.data.size(); i++) {
-                        layer->weight.data[i] -= 0.1 * grad_weight.data[i];
-                    }
-                    auto grad_bias = layer->bias.grad();
-                    for (size_t i = 0; i < grad_bias.data.size(); i++) {
-                        layer->bias.data[i] -= 0.1 * grad_bias.data[i];
-                    }
-                    layer->weight.zero_grad();
-                    layer->bias.zero_grad();
-                }
-                }, "Weight Update");
+                    /* Update weights */
+                    for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
+                        auto& data_weight = layer->weight.ptr->data;
+                        auto& grad_weight = layer->weight.grad().ptr->data;
+
+                        for (size_t i = 0; i < grad_weight.size(); i++) {
+                            data_weight[i] -= 0.1 * grad_weight[i]; // Modify real tensor
+                        }
+
+                        auto& data_bias = layer->bias.ptr->data;
+                        auto& grad_bias = layer->bias.grad().ptr->data;
+
+                        for (size_t i = 0; i < grad_bias.size(); i++) {
+                            data_bias[i] -= 0.1 * grad_bias[i];
+                        }
+
+                        layer->weight.zero_grad();
+                        layer->bias.zero_grad();
+                    }   
+
+                    }, "Weight Update");
 
                 batch_idx++;
             }
         }
-        return;
 
+        std::cout << "============================<EVAL PHASE>============================" << std::endl;
         /* EVALUATION PHASE */
         for (auto layer : {&linear1, &linear2, &linear3, &linear4, &linear5}) {
             layer->eval();
@@ -221,7 +227,9 @@ void train(const size_t num_threads = 1) {
             );
 
             /* Forward pass without gradient calculation */
-            Tensor x = Tensor(images_vec, {16, 784}, false);
+            size_t real_batch_size = batch.data.size(0);
+            Tensor x = Tensor(images_vec, {real_batch_size, 784}, false);
+
             Tensor y_pred = linear5.forward(
                                         linear4.forward(
                                                 linear3.forward(
@@ -231,8 +239,9 @@ void train(const size_t num_threads = 1) {
                                                 ).relu()
                                         )
                                 );
-
-            std::vector<float> predictions(y_pred.data.begin(), y_pred.data.end());
+            size_t pred_size = y_pred.data().size();
+            std::vector<float> predictions(pred_size);
+            std::memcpy(predictions.data(), y_pred.data().data(), pred_size * sizeof(float));
 
             /* Convert softmax output to class prediction */
             for (size_t i = 0; i < labels_vec.size(); i++) {
@@ -259,9 +268,9 @@ void train(const size_t num_threads = 1) {
             std::cout << "Accuracy for class " << class_label << ": " << class_accuracy << "%" << std::endl;
         }
 
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-    }
+        } catch (const std::exception& e) {
+            std::cerr << "Training failed: " << e.what() << std::endl;
+        }
 
     return;
 }

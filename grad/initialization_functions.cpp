@@ -6,7 +6,7 @@
  */
 Tensor Tensor::randn(const std::vector<size_t>& shape, bool requires_grad = false) {
     /* allocate memory for tensor */
-    size_t total_elems = Tensor::numel(shape);
+    size_t total_elems = numel(shape);
     std::vector<float> data(total_elems);
 
     std::uniform_real_distribution<float> distribution(0.0, 1.0);

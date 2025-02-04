@@ -1,8 +1,22 @@
 #include "cppgrad.h"
 size_t TILE_SIZE = 32;
-/* tiled matrix multiplication
- * we are using row major order
- * for efficient memory access it makes more sense to process rows than columns
+/**
+ * @brief Performs batched tiled matrix multiplication.
+ *
+ * This function computes the batched matrix multiplication C = A * B using a tiled approach
+ * to improve cache efficiency. It assumes A and B are stored in a row-major format and
+ * processes multiple batches efficiently by using pointer arithmetic instead of the `[]` operator.
+ *
+ * @param A Input matrix A, stored as a 1D vector in row-major order.
+ * @param B Input matrix B, stored as a 1D vector in row-major order.
+ * @param C Output matrix C, stored as a 1D vector in row-major order.
+ * @param m Number of rows in A.
+ * @param n Shared dimension between A and B.
+ * @param p Number of columns in B.
+ * @param batch_size Number of batches to process.
+ * @param A_offsets Starting offsets of A for each batch.
+ * @param B_offsets Starting offsets of B for each batch.
+ * @param C_offsets Starting offsets of C for each batch.
  */
 void matmul_tiled(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C,
                   size_t m, size_t n, size_t p,
@@ -49,23 +63,42 @@ void matmul_tiled(const std::vector<float>& A, const std::vector<float>& B, std:
     }
 }
 
-
-/*
- * todo relpace [] operator with direct pointer access
- * Matrix multiplication where either A or B is transposed
+/**
+ * @brief Performs tiled matrix multiplication where either A or B may be transposed.
+ *
+ * This function computes the batched matrix multiplication C = A * B using a tiled approach
+ * to improve cache efficiency. It supports cases where matrix A or matrix B (or both) are transposed.
+ * Instead of using the `[]` operator for indexing, it leverages direct pointer arithmetic
+ * for improved performance.
+ *
+ * @param A Input matrix A, stored as a 1D vector in row-major order.
+ * @param A_shape Shape of matrix A.
+ * @param B Input matrix B, stored as a 1D vector in row-major order.
+ * @param B_shape Shape of matrix B.
+ * @param C Output matrix C, stored as a 1D vector in row-major order.
+ * @param C_shape Shape of matrix C.
+ * @param batch_shape Shape of the batch dimension.
+ * @param A_offsets Starting offsets of A for each batch.
+ * @param B_offsets Starting offsets of B for each batch.
+ * @param C_offsets Starting offsets of C for each batch.
+ * @param m Number of rows in A.
+ * @param n Shared dimension between A and B.
+ * @param p Number of columns in B.
+ * @param transpose_A If true, treats A as transposed.
+ * @param transpose_B If true, treats B as transposed.
  */
 void matmul_transposed_tiled(const std::vector<float>& A, 
-                                      const std::vector<size_t>& A_shape,
-                                      const std::vector<float>& B, 
-                                      const std::vector<size_t>& B_shape,
-                                      std::vector<float>& C, 
-                                      const std::vector<size_t>& C_shape,
-                                      const std::vector<size_t>& batch_shape,
-                                      const std::vector<size_t>& A_offsets,
-                                      const std::vector<size_t>& B_offsets,
-                                      const std::vector<size_t>& C_offsets,
-                                      size_t m, size_t n, size_t p, 
-                                      bool transpose_A, bool transpose_B) {
+                             const std::vector<size_t>& A_shape,
+                             const std::vector<float>& B, 
+                             const std::vector<size_t>& B_shape,
+                             std::vector<float>& C, 
+                             const std::vector<size_t>& C_shape,
+                             const std::vector<size_t>& batch_shape,
+                             const std::vector<size_t>& A_offsets,
+                             const std::vector<size_t>& B_offsets,
+                             const std::vector<size_t>& C_offsets,
+                             size_t m, size_t n, size_t p, 
+                             bool transpose_A, bool transpose_B) {
     
     /* Compute batch size */
     size_t batch_size = 1;
@@ -73,27 +106,12 @@ void matmul_transposed_tiled(const std::vector<float>& A,
         batch_size *= d;
     }
 
-    /* Determine index functions */
-    auto get_A_index = transpose_A ?
-        [](size_t offset, size_t i, size_t k, size_t m, size_t n) { return offset + k * m + i; }
-        :
-        [](size_t offset, size_t i, size_t k, size_t m, size_t n) { return offset + i * n + k; };
-
-    auto get_B_index = transpose_B ?
-        [](size_t offset, size_t k, size_t j, size_t n, size_t p) { return offset + j * n + k; }
-        :
-        [](size_t offset, size_t k, size_t j, size_t n, size_t p) { return offset + k * p + j; };
-
     /* Iterate over batches */
-    for (size_t b = 0; b < batch_size; b++) {
-        /* Compute offset into A */
-        size_t A_offset = A_offsets[b];
-
-        /* Compute offset into B */
-        size_t B_offset = B_offsets[b];
-
-        /* Compute offset into C */
-        size_t C_offset = C_offsets[b];
+    for (size_t b = 0; b < batch_size; ++b) {
+        /* Compute offset into A, B, and C */
+        const float* A_ptr = A.data() + A_offsets[b];
+        const float* B_ptr = B.data() + B_offsets[b];
+        float* C_ptr = C.data() + C_offsets[b];
 
         /* Process matrix multiplication with tiling */
         for (size_t i = 0; i < m; i += TILE_SIZE) {
@@ -101,19 +119,26 @@ void matmul_transposed_tiled(const std::vector<float>& A,
 
             for (size_t j = 0; j < p; j += TILE_SIZE) {
                 size_t j_end = std::min(j + TILE_SIZE, p);
+
                 for (size_t k = 0; k < n; k += TILE_SIZE) {
                     size_t k_end = std::min(k + TILE_SIZE, n);
 
                     /* Compute small tiles */
                     for (size_t ii = i; ii < i_end; ++ii) {
+                        float* C_row = C_ptr + ii * p;  // Pointer to C[ii, *]
+
                         for (size_t jj = j; jj < j_end; ++jj) {
                             float sum = 0.0f;
+                            float* C_cell = C_row + jj;  // Pointer to C[ii, jj]
+
                             for (size_t kk = k; kk < k_end; ++kk) {
-                                sum += A[get_A_index(A_offset, ii, kk, m, n)]
-                                     * B[get_B_index(B_offset, kk, jj, n, p)];
+                                size_t A_index = transpose_A ? (kk * m + ii) : (ii * n + kk);
+                                size_t B_index = transpose_B ? (jj * n + kk) : (kk * p + jj);
+                                
+                                sum += A_ptr[A_index] * B_ptr[B_index];
                             }
-                            /* Store result in C */
-                            C[C_offset + ii * p + jj] += sum;
+
+                            *C_cell += sum;  // C[ii, jj] += sum
                         }
                     }
                 }
@@ -122,16 +147,16 @@ void matmul_transposed_tiled(const std::vector<float>& A,
     }
 }
 
-/*
- * Matrix multiplication of two tensors,
- * supporting batches and broadcasting.
- * Assuming 
- * A has shape [..., m, n]
- * B has shape [..., x, p]
- * such that n == x
- * thus:
- * C = A.matul(B) has shape [..., m, p]
- * n_threads: number of threads to use
+/**
+ * @brief Performs batched matrix multiplication with broadcasting support.
+ *
+ * This function computes the matrix multiplication C = A.matmul(B), supporting batches and broadcasting.
+ * It assumes that A has shape [..., m, n] and B has shape [..., x, p] with n == x, resulting in 
+ * an output tensor C of shape [..., m, p]. The operation leverages multithreading to optimize performance.
+ *
+ * @param other The tensor B to multiply with the current tensor A.
+ * @param n_threads Number of threads to utilize for parallel computation.
+ * @return Tensor Resulting tensor C of shape [..., m, p].
  */
 Tensor Tensor::matmul(const Tensor &other) const {
     

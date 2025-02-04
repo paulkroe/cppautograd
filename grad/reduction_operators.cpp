@@ -5,13 +5,18 @@
  * supports backpropagation
  */
 Tensor Tensor::sum(size_t dim) const {
+
+    auto this_shape = ptr->shape;
+    auto this_data = ptr->data;
+    auto this_requires_grad = ptr->requires_grad;
+    
     /* check for valid dimension */
-    if (dim >= this->ptr->shape.size()) {
+    if (dim >= this_shape.size()) {
         throw std::invalid_argument("Invalid dimension for sum operation");
     }
 
     /* compute new shape afer reduction */
-    std::vector<size_t> new_shape = ptr->shape;
+    std::vector<size_t> new_shape = this_shape;
     new_shape.erase(new_shape.begin() + dim);
     if (new_shape.empty()) {
         new_shape.push_back(1);
@@ -27,7 +32,7 @@ Tensor Tensor::sum(size_t dim) const {
         /* compute the multi-dimensional index in the result shape */
         std::vector<size_t> coords_reduced = unravel_index(i, new_shape);
 
-        std::vector<size_t> coords_full(ptr->shape.size());
+        std::vector<size_t> coords_full(this_shape.size());
         
         /* 
          * copy the reduced coords into coords_full, skipping an index for `dim`
@@ -39,7 +44,7 @@ Tensor Tensor::sum(size_t dim) const {
 
         /* index for coords_reduced */
         size_t r_i = 0;
-        for (size_t full_i = 0; full_i < ptr->shape.size(); full_i++) {
+        for (size_t full_i = 0; full_i < this_shape.size(); full_i++) {
             if (full_i == dim) {
                 /* skip entry in dim */
                 continue;
@@ -50,12 +55,12 @@ Tensor Tensor::sum(size_t dim) const {
 
         /* sum over j in [0..shape[dim]) */
         float sum_val = 0.0f;
-        for (size_t j = 0; j < ptr->shape[dim]; j++) {
+        for (size_t j = 0; j < this_shape[dim]; j++) {
             /* index using j into left out dimension */
             coords_full[dim] = j;
             /* flatten out the multi-index */
-            size_t index = ravel_index(coords_full, ptr->shape);
-            sum_val += ptr->data[index];
+            size_t index = ravel_index(coords_full, this_shape);
+            sum_val += this_data[index];
         }
 
         /* insert sum in result tensor */
@@ -63,7 +68,7 @@ Tensor Tensor::sum(size_t dim) const {
     }
 
     /* allocate result tensor */
-    Tensor result = Tensor(result_data, new_shape, ptr->requires_grad);
+    Tensor result = Tensor(result_data, new_shape, this_requires_grad);
     
     /* construct backward function */
     if (result.ptr->requires_grad) {
@@ -78,7 +83,7 @@ Tensor Tensor::sum(size_t dim) const {
         /* add result to computation graph */
         {
             std::lock_guard<std::mutex> lock(TensorData::GLOBAL_PARENTS_MUTEX);
-            if (this->ptr->requires_grad) {
+            if (this_requires_grad) {
                 result.ptr->parents[tid].insert(this->ptr);
             }
         }
@@ -89,16 +94,19 @@ Tensor Tensor::sum(size_t dim) const {
             std::lock_guard<std::mutex> lock(TensorData::GLOBAL_GRAD_MUTEX);
             if (this->ptr->requires_grad) {
                 if (!this->ptr->thread_gradients[tid]) {
-                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this->ptr->data.size(), 0.0f), this->ptr->shape, false);
+                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this_data.size(), 0.0f), this_shape, false);
                 }
                 this_grad = this->ptr->thread_gradients[tid];
             }
         }
 
         result.ptr->backward_fn = [
-            this_ptr = this->ptr, result_ptr = result.ptr, dim]() {
+            this_ptr = this->ptr, this_shape, result_ptr = result.ptr, result_shape = new_shape, dim]() {
             
             std::thread::id tid = std::this_thread::get_id();
+
+            auto this_grad = this_ptr->thread_gradients[tid];
+            auto result_grad = result_ptr->thread_gradients[tid]->data;
 
             /* 
              * expand `result_grad` (shape = result_shape)
@@ -106,7 +114,6 @@ Tensor Tensor::sum(size_t dim) const {
              * for each element in the result_grad, we broadcast
              * over the reduced dimension.
              */
-            auto this_grad = this_ptr->thread_gradients[tid];
             std::vector<float> expanded_grad(this_grad->data.size(), 0.0f);
 
             /*
@@ -115,17 +122,17 @@ Tensor Tensor::sum(size_t dim) const {
              * then for each `j` in [0..this_shape[reduced_dim]),
              * spread the gradient`
              */
-            for (size_t i  = 0; i < result_ptr->thread_gradients[tid]->data.size(); ++i) {
-                float grad_val = result_ptr->thread_gradients[tid]->data[i];
+            for (size_t i  = 0; i < result_grad.size(); ++i) {
+                float grad_val = result_grad[i];
 
                 /* coords_reduced in the result's shape */
-                auto coords_reduced = unravel_index(i, result_ptr->shape);
+                auto coords_reduced = unravel_index(i, result_shape);
 
-                std::vector<size_t> coords_full(this_ptr->shape.size());
+                std::vector<size_t> coords_full(this_shape.size());
                 
                 /* fill coords_full except for the reduced_dim */
                 size_t r_i = 0;
-                for (size_t full_i = 0; full_i < this_ptr->shape.size(); full_i++) {
+                for (size_t full_i = 0; full_i < this_shape.size(); full_i++) {
                     if (full_i == dim) {
                         continue;
                     }
@@ -134,10 +141,10 @@ Tensor Tensor::sum(size_t dim) const {
                 }
 
                 /* spread the grad over the reduced dimension */
-                for (size_t j = 0; j < this_ptr->shape[dim]; j++) {
+                for (size_t j = 0; j < this_shape[dim]; j++) {
                     coords_full[dim] = j;
                     /* flatten out the multi-index */
-                    size_t index = ravel_index(coords_full, this_ptr->shape);
+                    size_t index = ravel_index(coords_full, this_shape);
                     expanded_grad[index] += grad_val;
                 }
             }
@@ -166,8 +173,13 @@ Tensor Tensor::sum() const {
  * supports backpropagation
  */
 Tensor Tensor::mean(size_t dim) const {
+
+    auto this_shape = ptr->shape;
+    auto this_data = ptr->data;
+    auto this_requires_grad = ptr->requires_grad;
+
     /* check for valid dimension */
-    if (dim >= ptr->shape.size()) {
+    if (dim >= this_shape.size()) {
         throw std::invalid_argument("Invalid dimension for mean operation");
     }
 
@@ -184,7 +196,7 @@ Tensor Tensor::mean(size_t dim) const {
     std::vector<float> result_data(result_size, 0.0f);
 
     /* divide by this factor after summation */
-    float divisor = static_cast<float>(ptr->shape[dim]);
+    float divisor = static_cast<float>(this_shape[dim]);
 
     /* iterate over result data and perform addition */
     for (size_t i = 0; i < result_size; ++i) {
@@ -192,7 +204,7 @@ Tensor Tensor::mean(size_t dim) const {
         /* compute the multi-dimensional index in the result shape */
         std::vector<size_t> coords_reduced = unravel_index(i, new_shape);
 
-        std::vector<size_t> coords_full(ptr->shape.size());
+        std::vector<size_t> coords_full(this_shape.size());
         
         /* 
          * copy the reduced coords into coords_full, skipping an index for `dim`
@@ -204,7 +216,7 @@ Tensor Tensor::mean(size_t dim) const {
 
         /* index for coords_reduced */
         size_t r_i = 0; 
-        for (size_t full_i = 0; full_i < ptr->shape.size(); full_i++) {
+        for (size_t full_i = 0; full_i < this_shape.size(); full_i++) {
             if (full_i == dim) {
                 /* skip entry in dim */
                 continue;
@@ -215,10 +227,10 @@ Tensor Tensor::mean(size_t dim) const {
 
         /* sum over j in [0..shape[dim]) */
         float sum_val = 0.0f;
-        for (size_t j = 0; j < ptr->shape[dim]; j++) {
+        for (size_t j = 0; j < this_shape[dim]; j++) {
             /* index using j into left out dimension */
             coords_full[dim] = j;
-            size_t index = ravel_index(coords_full, ptr->shape);
+            size_t index = ravel_index(coords_full, this_shape);
             sum_val += ptr->data[index];
         }
 
@@ -227,7 +239,7 @@ Tensor Tensor::mean(size_t dim) const {
     }
 
     /* allocate result tensor */
-    Tensor result = Tensor(result_data, new_shape, this->ptr->requires_grad);
+    Tensor result = Tensor(result_data, new_shape, this_requires_grad);
 
     /* construct backward function */
     if (result.ptr->requires_grad) {
@@ -237,7 +249,7 @@ Tensor Tensor::mean(size_t dim) const {
         /* add result to computation graph */
         {
             std::lock_guard<std::mutex> lock(TensorData::GLOBAL_PARENTS_MUTEX);
-            if (this->ptr->requires_grad) {
+            if (this_requires_grad) {
                 result.ptr->parents[tid].insert(this->ptr);
             }
         }
@@ -246,25 +258,27 @@ Tensor Tensor::mean(size_t dim) const {
         std::shared_ptr<TensorData> this_grad;
         {
             std::lock_guard<std::mutex> lock(TensorData::GLOBAL_GRAD_MUTEX);
-            if (this->ptr->requires_grad) {
+            if (this_requires_grad) {
                 if (!this->ptr->thread_gradients[tid]) {
-                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this->ptr->data.size(), 0.0f), this->ptr->shape, false);
+                    this->ptr->thread_gradients[tid] = std::make_shared<TensorData>(std::vector<float>(this_data.size(), 0.0f), this_shape, false);
                 }
                 this_grad = this->ptr->thread_gradients[tid];
             }
         }
 
-        result.ptr->backward_fn = [this_ptr = this->ptr, result_ptr = result.ptr, dim, divisor]() {
+        result.ptr->backward_fn = [this_ptr = this->ptr, this_shape, result_ptr = result.ptr, result_shape = new_shape, dim, divisor]() {
             
                 std::thread::id tid = std::this_thread::get_id();
 
+               auto this_grad = this_ptr->thread_gradients[tid];
+               auto result_grad = result_ptr->thread_gradients[tid]->data;
                /* 
                 * expand `result_grad` (shape = result_shape)
                 * back to `this_shape`. 
                 * for each element in the result_grad, we broadcast
                 * over the reduced dimension.
                 */
-               auto this_grad = this_ptr->thread_gradients[tid];
+               
                std::vector<float> expanded_grad(this_grad->data.size(), 0.0f);
 
                /*
@@ -273,17 +287,17 @@ Tensor Tensor::mean(size_t dim) const {
                 * then for each `j` in [0..this_shape[reduced_dim]),
                 * spread the gradient`
                 */
-                for (size_t i = 0; i < result_ptr->thread_gradients[tid]->data.size(); ++i) {
-                    float grad_val = result_ptr->thread_gradients[tid]->data[i];
+                for (size_t i = 0; i < result_grad.size(); ++i) {
+                    float grad_val = result_grad[i];
                 
                     /* coords_reduced in the result's shape */
-                    auto coords_reduced = unravel_index(i, result_ptr->shape);
+                    auto coords_reduced = unravel_index(i, result_shape);
 
-                    std::vector<size_t> coords_full(this_ptr->shape.size());
+                    std::vector<size_t> coords_full(this_shape.size());
                     
                     /* fill coords_full except for the reduced_dim */
                     size_t r_i = 0; 
-                    for (size_t full_i = 0; full_i < this_ptr->shape.size(); full_i++) {
+                    for (size_t full_i = 0; full_i < this_shape.size(); full_i++) {
                         if (full_i == dim) {
                             continue;
                         }
@@ -292,9 +306,9 @@ Tensor Tensor::mean(size_t dim) const {
                     }
 
                     /* spread the grad over the reduced dimension */
-                    for (size_t j = 0; j < this_ptr->shape[dim]; j++) {
+                    for (size_t j = 0; j < this_shape[dim]; j++) {
                         coords_full[dim] = j;
-                        size_t index = ravel_index(coords_full, this_ptr->shape);
+                        size_t index = ravel_index(coords_full, this_shape);
                         expanded_grad[index] += grad_val / divisor;
                     }
                 }

@@ -71,6 +71,15 @@ The average batch time dropped from 60 seconds to just 0.13 seconds.
 
 While this is not a comprehensive benchmark, the optimizations successfully removed major bottlenecks, making training vastly more efficient.
 
+![Total Time Boxplot](plots/training_time.jpeg)
+
+Average Speedup (1 Thread vs 2 Threads): 1.82x​
+
+Average Speedup (1 Thread vs 4 Threads): 2.41x
+
+![Accuracy Boxplot](plots/accuracy.jpeg)
+
+
 ## Usage
 
 This tutorial demonstrates how to use the autograd engine step by step.

@@ -247,7 +247,7 @@ int main() {
 
     float train_time = 0.0f;
     float test_time = 0.0f;
-    size_t num_threads = 4;
+    size_t num_threads = 1;
     size_t batch_size = 32;
     
     /* Define the model */

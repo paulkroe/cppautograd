@@ -1,14 +1,36 @@
 #include "cppgrad.h"
 
-/* 
- * Overloaded + operator, does support broadcasting
- * 1. check if tensors are broadcastable
- * 2. iterate over result data
- * 3. construct multi-dimensional index
- * 4. perform addition
- * 4. if necessary, set up the backward function
+/**
+ * @brief Element-wise addition of two tensors with broadcasting support.
+ *
+ * This operator performs element-wise addition between the current tensor and `other`,
+ * supporting **broadcasting** to handle different shapes. The resulting tensor's shape
+ * follows standard **NumPy broadcasting rules**.
+ *
+ * Steps:
+ * 1. **Check broadcast compatibility:** Ensures the two tensors can be broadcasted.
+ * 2. **Iterate over result data:** Performs element-wise addition with correct indexing.
+ * 3. **Construct multi-dimensional indices:** Maps input indices to the broadcasted result.
+ * 4. **Compute sum:** Stores the computed sum in the output tensor.
+ * 5. **Set up autograd:** If either tensor requires gradients, registers a backward function.
+ *
+ * @param other The tensor to add to the current tensor.
+ * @return Tensor The result of element-wise addition, with shape determined by broadcasting.
+ * 
+ * @throws std::invalid_argument If the tensors cannot be broadcasted.
+ *
+ * @note If either operand has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1, 2, 3}, {3}, true);   // Shape: (3,)
+ * Tensor b({5}, {1}, false);        // Shape: (1,)
+ * Tensor c = a + b;                 // Shape: (3,), values: {6, 7, 8}
+ * @endcode
  */
-Tensor Tensor::operator+(const Tensor& other) const{
+Tensor Tensor::operator+(const Tensor& other) const {
+
     
     auto this_shape = this->ptr->shape;
     auto other_shape = other.ptr->shape;
@@ -111,21 +133,52 @@ Tensor Tensor::operator+(const Tensor& other) const{
     return result;
 }
 
-/*
- * Overloaded + operator, for adding scalar and tensor
+/**
+ * @brief Adds a scalar value to each element of the tensor.
+ *
+ * This operator performs element-wise addition between the current tensor and a scalar.
+ * It internally converts the scalar into a **broadcastable tensor** before performing the addition.
+ *
+ * @param other The scalar value to add to each element of the tensor.
+ * @return Tensor The result of adding `other` to each element of the tensor.
+ *
+ * @note If the tensor has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1.0, 2.0, 3.0}, {3}, true); // Shape: (3,)
+ * Tensor b = a + 5.0f;                  // Shape: (3,), values: {6.0, 7.0, 8.0}
+ * @endcode
  */
-Tensor Tensor::operator+(const float other) const{
+Tensor Tensor::operator+(const float other) const {
     return *this + Tensor({other}, false);
 }
 
-/* 
- * Overloaded unary - operator
- * 1. Negate the data
- * 2. Negate the gradient if necessary
- * 3. Construct the result tensor
- * 4. If necessary, set up the backward function
+/**
+ * @brief Negates all elements in the tensor.
+ *
+ * This operator applies element-wise negation to the tensor, returning a new tensor
+ * where each element is multiplied by `-1`.
+ *
+ * Steps:
+ * 1. **Negate the data:** Computes `-x` for each element.
+ * 2. **Negate the gradient (if applicable):** Ensures correct gradient propagation.
+ * 3. **Construct the result tensor:** Stores the negated values.
+ * 4. **Set up autograd:** If `requires_grad = true`, registers a backward function.
+ *
+ * @return Tensor A tensor with all elements negated.
+ *
+ * @note If the tensor has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1.0, -2.0, 3.0}, {3}, true); // Shape: (3,)
+ * Tensor b = -a;                         // Shape: (3,), values: {-1.0, 2.0, -3.0}
+ * @endcode
  */
-Tensor Tensor::operator-() const{
+Tensor Tensor::operator-() const {
     
     auto this_shape = this->ptr->shape;
 
@@ -186,29 +239,85 @@ Tensor Tensor::operator-() const{
     return result;
 }
 
-/* 
- * Overloaded binary - operator
- * using unary - and + operators
- * this - other = this + (-other)
+/**
+ * @brief Performs element-wise subtraction between two tensors with broadcasting support.
+ *
+ * This operator computes the difference between the current tensor and `other`, supporting
+ * **broadcasting** as per **NumPy broadcasting rules**. Internally, it utilizes the overloaded
+ * unary negation and addition operators:
+ * \f[
+ * \text{result} = \text{this} - \text{other} = \text{this} + (-\text{other})
+ * \f]
+ *
+ * @param other The tensor to subtract from the current tensor.
+ * @return Tensor The result of element-wise subtraction, with shape determined by broadcasting.
+ *
+ * @throws std::invalid_argument If the tensors cannot be broadcasted.
+ *
+ * @note If either operand has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1, 2, 3}, {3}, true);   // Shape: (3,)
+ * Tensor b({5, 1, 0}, {3}, false);  // Shape: (3,)
+ * Tensor c = a - b;                 // Shape: (3,), values: {-4, 1, 3}
+ * @endcode
  */
 Tensor Tensor::operator-(const Tensor& other) const{
     /* a - b =  a + (-b) */
     return *this + (-other);
 }
-/*
- * Overloaded - operator, for subtracting scalar and tensor
+
+/**
+ * @brief Subtracts a scalar value from each element of the tensor.
+ *
+ * This operator performs element-wise subtraction between the tensor and a scalar.
+ * Internally, it converts the scalar into a **broadcastable tensor** before performing the operation.
+ *
+ * @param other The scalar value to subtract from each element of the tensor.
+ * @return Tensor The result of subtracting `other` from each element of the tensor.
+ *
+ * @note If the tensor has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1.0, 2.0, 3.0}, {3}, true); // Shape: (3,)
+ * Tensor b = a - 2.0f;                  // Shape: (3,), values: {-1.0, 0.0, 1.0}
+ * @endcode
  */
-Tensor Tensor::operator-(const float other) const{
+Tensor Tensor::operator-(const float other) const {
     return *this - Tensor({other}, false);
 }
 
-/* 
- * Overloaded * operator, does support broadcasting
- * 1. Check if tensors are broadcastable
- * 2. iterate over result data
- * 3. construct multi-dimensional index
- * 4. perform multiplication
- * 4. If necessary, set up the backward function
+/**
+ * @brief Performs element-wise multiplication between two tensors with broadcasting support.
+ *
+ * This operator computes the product of the current tensor and `other`, supporting
+ * **broadcasting** to handle different shapes as per **NumPy broadcasting rules**.
+ *
+ * Steps:
+ * 1. **Check broadcast compatibility:** Ensures the two tensors can be broadcasted.
+ * 2. **Iterate over result data:** Computes the product for each element.
+ * 3. **Construct multi-dimensional indices:** Maps input indices to the broadcasted result.
+ * 4. **Compute product:** Stores the computed product in the output tensor.
+ * 5. **Set up autograd:** If either tensor requires gradients, registers a backward function.
+ *
+ * @param other The tensor to multiply with the current tensor.
+ * @return Tensor The result of element-wise multiplication, with shape determined by broadcasting.
+ *
+ * @throws std::invalid_argument If the tensors cannot be broadcasted.
+ *
+ * @note If either operand has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1, 2, 3}, {3}, true);   // Shape: (3,)
+ * Tensor b({5, 1, 0}, {3}, false);  // Shape: (3,)
+ * Tensor c = a * b;                 // Shape: (3,), values: {5, 2, 0}
+ * @endcode
  */
 Tensor Tensor::operator*(const Tensor& other) const {
     
@@ -360,20 +469,57 @@ Tensor Tensor::operator*(const Tensor& other) const {
     return result;
 }
 
-/*
- * Overloaded * operator, for multiplying scalar and tensor
+/**
+ * @brief Multiplies each element of the tensor by a scalar value.
+ *
+ * This operator performs element-wise multiplication between the tensor and a scalar.
+ * Internally, it converts the scalar into a **broadcastable tensor** before performing
+ * the operation.
+ *
+ * @param other The scalar value to multiply with each element of the tensor.
+ * @return Tensor The result of multiplying `other` with each element of the tensor.
+ *
+ * @note If the tensor has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({1.0, 2.0, 3.0}, {3}, true); // Shape: (3,)
+ * Tensor b = a * 2.0f;                  // Shape: (3,), values: {2.0, 4.0, 6.0}
+ * @endcode
  */
 Tensor Tensor::operator*(const float other) const {
     return *this * Tensor({other}, false);
 }
 
-/* 
- * Overloaded / operator, does support broadcasting
- * 1. Check if tensors are broadcastable
- * 2. iterate over result data
- * 3. construct multi-dimensional index
- * 4. perform division
- * 4. If necessary, set up the backward function
+/**
+ * @brief Performs element-wise division between two tensors with broadcasting support.
+ *
+ * This operator computes the division of the current tensor by `other`, supporting
+ * **broadcasting** as per **NumPy broadcasting rules**.
+ *
+ * Steps:
+ * 1. **Check broadcast compatibility:** Ensures the two tensors can be broadcasted.
+ * 2. **Iterate over result data:** Computes the quotient for each element.
+ * 3. **Construct multi-dimensional indices:** Maps input indices to the broadcasted result.
+ * 4. **Compute division:** Stores the computed quotient in the output tensor.
+ * 5. **Set up autograd:** If either tensor requires gradients, registers a backward function.
+ *
+ * @param other The tensor by which to divide the current tensor.
+ * @return Tensor The result of element-wise division, with shape determined by broadcasting.
+ *
+ * @throws std::invalid_argument If the tensors cannot be broadcasted.
+ * @throws std::runtime_error If division by zero occurs.
+ *
+ * @note If either operand has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({10, 20, 30}, {3}, true);  // Shape: (3,)
+ * Tensor b({2, 5, 3}, {3}, false);    // Shape: (3,)
+ * Tensor c = a / b;                   // Shape: (3,), values: {5.0, 4.0, 10.0}
+ * @endcode
  */
 Tensor Tensor::operator/(const Tensor& other) const {
  
@@ -527,15 +673,48 @@ Tensor Tensor::operator/(const Tensor& other) const {
     return result;
 }
 
-/*
- * Overloaded * operator, for multiplying scalar and tensor
+/**
+ * @brief Divides each element of the tensor by a scalar value.
+ *
+ * This operator performs element-wise division between the tensor and a scalar.
+ * Internally, it converts the scalar into a **broadcastable tensor** before performing
+ * the operation.
+ *
+ * @param other The scalar value by which to divide each element of the tensor.
+ * @return Tensor The result of dividing each element of the tensor by `other`.
+ *
+ * @throws std::runtime_error If division by zero occurs.
+ *
+ * @note If the tensor has `requires_grad = true`, the resulting tensor will also
+ *       require gradients and track operations for automatic differentiation.
+ *
+ * @example
+ * @code
+ * Tensor a({10.0, 20.0, 30.0}, {3}, true); // Shape: (3,)
+ * Tensor b = a / 2.0f;                     // Shape: (3,), values: {5.0, 10.0, 15.0}
+ * @endcode
  */
 Tensor Tensor::operator/(const float other) const {
     return *this / Tensor({other}, false);
 }
 
-/* 
- * Helper function to the << operator
+/**
+ * @brief Recursively prints tensor data in a structured format.
+ *
+ * This function is used internally by the `<<` operator to print tensor values
+ * in a **multi-dimensional array format**. It ensures that nested dimensions
+ * are displayed correctly.
+ *
+ * @param os The output stream to write to.
+ * @param dim The current dimension being processed.
+ * @param offset The starting index in the tensor's data vector.
+ * @param stride The step size to traverse along the current dimension.
+ *
+ * @example
+ * @code
+ * Tensor t({1.0, 2.0, 3.0, 4.0}, {2, 2});
+ * std::cout << t; // Calls print_recursive() internally
+ * @endcode
  */
 void Tensor::print_recursive(std::ostream& os, size_t dim, size_t offset, size_t stride) const {
     os << "[";
@@ -552,9 +731,25 @@ void Tensor::print_recursive(std::ostream& os, size_t dim, size_t offset, size_t
     os << "]";
 }
 
-/*
- * Overloaded << operator
- * Print tensor data and shape, similar to PyTorch
+/**
+ * @brief Overloaded output stream operator for printing tensors.
+ *
+ * This operator prints the tensor in a format similar to PyTorch:
+ * ```
+ * Tensor([[1.0, 2.0], [3.0, 4.0]], shape=[2, 2])
+ * ```
+ * The tensor values are printed using `print_recursive()` to ensure correct formatting
+ * for multi-dimensional tensors.
+ *
+ * @param os The output stream to write to.
+ * @param tensor The tensor to be printed.
+ * @return std::ostream& The output stream with the formatted tensor data.
+ *
+ * @example
+ * @code
+ * Tensor t({1.0, 2.0, 3.0, 4.0}, {2, 2});
+ * std::cout << t; // Prints: Tensor([[1.0, 2.0], [3.0, 4.0]], shape=[2, 2])
+ * @endcode
  */
 std::ostream& operator<<(std::ostream& os, const Tensor& tensor) {
     os << "Tensor(";

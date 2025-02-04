@@ -1,8 +1,30 @@
 #include "cppgrad.h"
 
-/* 
- * elementwise logarithm of the tensor
- * supports backpropagation
+/**
+ * @brief Computes the element-wise natural logarithm of the tensor.
+ *
+ * This function applies the natural logarithm (\f$\log(x)\f$) to each element
+ * of the tensor. The operation supports **automatic differentiation**, meaning
+ * gradients are computed correctly during backpropagation.
+ *
+ * **Gradient computation:**  
+ * If `y = x.log()`, then during backpropagation:
+ * \f[
+ * \frac{dL}{dx} = \frac{dL}{dy} \cdot \frac{1}{x}
+ * \f]
+ *
+ * @return Tensor A tensor where each element is the natural logarithm of the original tensor.
+ *
+ * @throws std::domain_error If any element in the tensor is non-positive (as \f$\log(x)\f$
+ *         is undefined for \f$x \leq 0\f$).
+ *
+ * @note The resulting tensor retains `requires_grad` if the original tensor does.
+ *
+ * @example
+ * @code
+ * Tensor t({1.0, 2.0, 3.0}, {3}, true); // Shape: (3,)
+ * Tensor log_t = t.log();               // Shape: (3,), values: {0.0, 0.693, 1.098}
+ * @endcode
  */
 Tensor Tensor::log() const {
     
@@ -70,12 +92,30 @@ Tensor Tensor::log() const {
     return result;
 }
 
-/* 
- * elementwise exponential of the tensor
- * supports backpropagation
+/**
+ * @brief Computes the element-wise exponential of the tensor.
+ *
+ * This function applies the exponential function (\f$e^x\f$) to each element
+ * of the tensor. The operation supports **automatic differentiation**, meaning
+ * gradients are computed correctly during backpropagation.
+ *
+ * **Gradient computation:**  
+ * If `y = x.exp()`, then during backpropagation:
+ * \f[
+ * \frac{dL}{dx} = \frac{dL}{dy} \cdot e^x
+ * \f]
+ *
+ * @return Tensor A tensor where each element is the exponential of the original tensor.
+ *
+ * @note The resulting tensor retains `requires_grad` if the original tensor does.
+ *
+ * @example
+ * @code
+ * Tensor t({0.0, 1.0, 2.0}, {3}, true); // Shape: (3,)
+ * Tensor exp_t = t.exp();               // Shape: (3,), values: {1.0, 2.718, 7.389}
+ * @endcode
  */
-Tensor Tensor::exp() const{
-
+Tensor Tensor::exp() const {
     auto this_shape = this->ptr->shape;
     auto this_data = this->ptr->data;
 

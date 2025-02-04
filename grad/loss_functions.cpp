@@ -1,7 +1,24 @@
 #include "cppgrad.h"
 
-/* 
- * softmax function along a given dimension
+/**
+ * @brief Computes the softmax function along a specified dimension.
+ *
+ * The softmax function normalizes the input tensor along the given dimension,
+ * ensuring that the output values sum to 1 along that axis. It is defined as:
+ * \f[
+ * \text{softmax}(x_i) = \frac{e^{x_i}}{\sum_j e^{x_j}}
+ * \f]
+ * 
+ * A small constant (\f$10^{-6}\f$) is added to the denominator for numerical stability.
+ *
+ * @param dim The dimension along which to apply the softmax function.
+ * @return Tensor The softmax-normalized tensor.
+ *
+ * @example
+ * @code
+ * Tensor logits = Tensor({2.0, 1.0, 0.1}, {3});
+ * Tensor probabilities = logits.softmax(0);
+ * @endcode
  */
 Tensor Tensor::softmax(size_t dim) const {
     /* exponentiate tensor */
@@ -15,16 +32,40 @@ Tensor Tensor::softmax(size_t dim) const {
     return exp_tensor / sum_exp;
 }
 
-/* 
- * softmax function along trailing dimension
+/**
+ * @brief Computes the softmax function along the last dimension.
+ *
+ * This function applies the softmax operation along the last axis of the tensor.
+ * It is equivalent to calling `softmax(dim)` with `dim = tensor.ndim() - 1`.
+ *
+ * @return Tensor The softmax-normalized tensor.
+ *
+ * @example
+ * @code
+ * Tensor logits = Tensor({{2.0, 1.0, 0.1}, {0.5, 0.7, 0.2}}, {2, 3});
+ * Tensor probabilities = logits.softmax();
+ * @endcode
  */
 Tensor Tensor::softmax() const {
     return softmax(ptr->shape.size() - 1);
 }
 
-/* 
- * one-hot encoding of the tensor
- * num_classes: number of classesz
+/**
+ * @brief Converts a tensor of class indices into a one-hot encoded representation.
+ *
+ * This function expands the input tensor along a new trailing dimension, representing
+ * class indices as one-hot vectors. The resulting tensor has shape `[..., num_classes]`,
+ * where each value is replaced with a one-hot encoded vector.
+ *
+ * @param num_classes The total number of classes in the encoding.
+ * @return Tensor The one-hot encoded tensor.
+ * @throws std::invalid_argument If any input value is out of bounds for `num_classes`.
+ *
+ * @example
+ * @code
+ * Tensor labels = Tensor({0, 2, 1}, {3});
+ * Tensor one_hot = labels.onehot_encode(3);
+ * @endcode
  */
 Tensor Tensor::onehot_encode(size_t num_classes) const {
 
@@ -118,10 +159,29 @@ Tensor Tensor::onehot_encode(size_t num_classes) const {
 
 }
 
-/*
- * Cross Entropy Loss
- * y_pred: Tensor of shape (batch_size, num_classes)
- * y_true: Tensor of shape (batch_size)
+/**
+ * @brief Computes the Cross Entropy Loss between predicted and true labels.
+ *
+ * This function computes the categorical cross-entropy loss.
+ * It first applies softmax to `y_pred` along the last dimension, 
+ * then computes the negative log-likelihood weighted by one-hot
+ * encoded `y_true`. Finally, it returns the mean loss over the batch dimension.
+ *
+ * The formula for cross-entropy loss is:
+ * \f[
+ * L = - \frac{1}{N} \sum_{i=1}^{N} \sum_{j=1}^{C} y_{ij} \log(\text{softmax}(x_{ij}))
+ * \f]
+ *
+ * @param y_pred Tensor of shape `(batch_size, num_classes)`, representing model logits.
+ * @param y_true Tensor of shape `(batch_size)`, containing ground truth class indices.
+ * @return Tensor The scalar cross-entropy loss.
+ *
+ * @example
+ * @code
+ * Tensor logits = Tensor({{2.0, 1.0, 0.1}, {0.5, 0.7, 0.2}}, {2, 3});
+ * Tensor labels = Tensor({0, 2}, {2});
+ * Tensor loss = CrossEntropyLoss(logits, labels);
+ * @endcode
  */
 Tensor CrossEntropyLoss(const Tensor& y_pred, const Tensor& y_true) {
     /* compute the softmax of y_pred along the last dimension (class axis) */

@@ -1,8 +1,26 @@
 #include "cppgrad.h"
 
-/*
- * reducing tensor by summing over given dimension
- * supports backpropagation
+/**
+ * @brief Computes the sum of the tensor elements along a given dimension.
+ *
+ * This function reduces the tensor by summing over the specified dimension,
+ * producing a new tensor with one less dimension.
+ * 
+ * It supports **automatic differentiation**, meaning the sum operation 
+ * contributes to backpropagation.
+ *
+ * @param dim The dimension along which to compute the sum.
+ * @return Tensor A reduced tensor with one less dimension.
+ *
+ * @throws std::invalid_argument If `dim` is out of bounds.
+ *
+ * @note The resulting tensor retains `requires_grad` if the original tensor does.
+ *
+ * @example
+ * @code
+ * Tensor t({{1.0, 2.0}, {3.0, 4.0}}, {2, 2}, true); // Shape: (2,2)
+ * Tensor s = t.sum(0); // Shape: (1,2), values: {4.0, 6.0}
+ * @endcode
  */
 Tensor Tensor::sum(size_t dim) const {
 
@@ -160,17 +178,49 @@ Tensor Tensor::sum(size_t dim) const {
     return result;
 }
 
-/*
- * reducing tensor by summing over the tailing dimension
- * supports backpropagation
+/**
+ * @brief Computes the sum over the last dimension of the tensor.
+ *
+ * This is a convenience function that calls `sum(dim)`, where `dim`
+ * is the last axis (`shape.size() - 1`). It reduces the tensor by summing
+ * along the trailing dimension.
+ *
+ * @return Tensor A reduced tensor with one less dimension.
+ *
+ * @throws std::invalid_argument If the tensor has no dimensions.
+ *
+ * @note Supports **automatic differentiation** and retains `requires_grad` if applicable.
+ *
+ * @example
+ * @code
+ * Tensor t({{1.0, 2.0}, {3.0, 4.0}}, {2, 2}, true);
+ * Tensor s = t.sum(); // Shape: (2,), values: {3.0, 7.0}
+ * @endcode
  */
 Tensor Tensor::sum() const {
     return sum(ptr->shape.size() - 1);
 }
 
-/*
- * reducing tensor by taking mean over given dimension
- * supports backpropagation
+/**
+ * @brief Computes the mean of the tensor elements along a given dimension.
+ *
+ * This function reduces the tensor by computing the average over the specified dimension,
+ * producing a new tensor with one less dimension.
+ *
+ * It supports **automatic differentiation**, allowing gradients to propagate correctly.
+ *
+ * @param dim The dimension along which to compute the mean.
+ * @return Tensor A reduced tensor with one less dimension.
+ *
+ * @throws std::invalid_argument If `dim` is out of bounds.
+ *
+ * @note The resulting tensor retains `requires_grad` if the original tensor does.
+ *
+ * @example
+ * @code
+ * Tensor t({{1.0, 2.0}, {3.0, 4.0}}, {2, 2}, true); // Shape: (2,2)
+ * Tensor m = t.mean(0); // Shape: (1,2), values: {2.0, 3.0}
+ * @endcode
  */
 Tensor Tensor::mean(size_t dim) const {
 
@@ -324,10 +374,26 @@ Tensor Tensor::mean(size_t dim) const {
     return result;
 }
 
-/*
- * reducing tensor by taking the mean over the tailing dimension
- * supports backpropagation
+/**
+ * @brief Computes the mean over the last dimension of the tensor.
+ *
+ * This is a convenience function that calls `mean(dim)`, where `dim`
+ * is the last axis (`shape.size() - 1`). It reduces the tensor by averaging
+ * along the trailing dimension.
+ *
+ * @return Tensor A reduced tensor with one less dimension.
+ *
+ * @throws std::invalid_argument If the tensor has no dimensions.
+ *
+ * @note Supports **automatic differentiation** and retains `requires_grad` if applicable.
+ *
+ * @example
+ * @code
+ * Tensor t({{1.0, 2.0}, {3.0, 4.0}}, {2, 2}, true);
+ * Tensor m = t.mean(); // Shape: (2,), values: {1.5, 3.5}
+ * @endcode
  */
 Tensor Tensor::mean() const {
+
     return mean(ptr->shape.size() - 1);
 }

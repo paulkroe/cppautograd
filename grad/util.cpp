@@ -1,12 +1,38 @@
 #include "cppgrad.h"
+
+/**
+ * @brief Global atomic counter for assigning unique tensor IDs.
+ *
+ * Each new tensor gets a unique ID to track dependencies in the computation graph.
+ */
 std::atomic<std::uint64_t> id_counter = 1;
+
+/**
+ * @brief Global random number generator used for weight initialization.
+ *
+ * The generator is initialized with a fixed seed (`42`) for reproducibility.
+ */
 std::mt19937 global_generator(42);
 
+/**
+ * @brief Global mutex for synchronizing access to thread-local gradients.
+ */
 std::mutex TensorData::GLOBAL_GRAD_MUTEX;
+
+/**
+ * @brief Global mutex for synchronizing access to parent tensors in the computation graph.
+ */
 std::mutex TensorData::GLOBAL_PARENTS_MUTEX;
 
-/* helper function to get tensor id*/
+
+/**
+ * @brief Generates a unique ID for a new tensor.
+ *
+ * @return size_t A unique tensor ID.
+ * @throws std::runtime_error If the ID counter overflows.
+ */
 size_t get_id() {
+
     size_t counter = id_counter++;
     if (counter == 0) {
         throw std::runtime_error("Tensor ID counter overflow");
@@ -14,12 +40,20 @@ size_t get_id() {
     return counter;
 }
 
-/* helper function to set random seed */
+/**
+ * @brief Sets the random seed for the global random number generator.
+ *
+ * @param seed The seed value for deterministic random number generation.
+ */
 void set_seed(int seed) {
     global_generator.seed(seed);
 }
 
-/* helper function zeroing out the gradient */
+/**
+ * @brief Resets the gradient of the tensor to zero.
+ *
+ * This function is used to clear accumulated gradients before a new backward pass.
+ */
 void Tensor::zero_grad() {
     std::thread::id tid = std::this_thread::get_id();
     if (ptr->thread_gradients[tid]) {
@@ -27,7 +61,12 @@ void Tensor::zero_grad() {
     }
 }
 
-/* helper function to count the number of elements */
+/**
+ * @brief Computes the total number of elements in a given shape.
+ *
+ * @param shp The shape vector representing tensor dimensions.
+ * @return size_t The total number of elements.
+ */
 size_t numel(const std::vector<size_t>& shp) {
     size_t product = 1;
     for (auto s : shp) {
@@ -36,20 +75,16 @@ size_t numel(const std::vector<size_t>& shp) {
     return product;
 }
 
-/* helper function to print the shape of a tensor */
-void Tensor::print_shape() const{
-    for (size_t s : ptr->shape) {
-        std::cout << s << " ";
-    }
-    std::cout << std::endl;
-}
-
-/* 
- * given two shapes, returns the shape that results 
- * from broadcasting the two shapes
- * returns an empty vector if the shapes are not broadcastable
- * when iterating over the dimension sizes, starting at the trailing dimension,
- * the dimension sizes must either be equal, one of them is 1, or one of them does not exist
+/**
+ * @brief Computes the broadcasted shape for two tensors.
+ *
+ * This function follows **NumPy broadcasting rules**:
+ * - Two dimensions are compatible if they are equal or one of them is `1`.
+ * - If incompatible, an empty vector is returned.
+ *
+ * @param shape1 The shape of the first tensor.
+ * @param shape2 The shape of the second tensor.
+ * @return std::vector<size_t> The broadcasted shape, or an empty vector if broadcasting fails.
  */
 std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2) {
     /* number of dimensions in the broadcasted tensor */
@@ -75,9 +110,14 @@ std::vector<size_t> broadcast(const std::vector<size_t>& shape1, const std::vect
     return result;
 }
 
-/*
- * given a multi-dimensional coordinate and a shape, flatten 
- * back to a single offset in row-major order
+/**
+ * @brief Converts a multi-dimensional index into a single linear index.
+ *
+ * This function assumes **row-major ordering**.
+ *
+ * @param multi_index A vector representing a multi-dimensional index.
+ * @param shape The shape of the tensor.
+ * @return size_t The corresponding linear index.
  */
 size_t ravel_index(const std::vector<size_t>& multi_index,
                         const std::vector<size_t>& shape) {
@@ -107,11 +147,12 @@ size_t ravel_index(const std::vector<size_t>& multi_index,
     return linear_index;
 }
 
-/*
- * given a linear index `idx` and a shape vector, produce
- * the multi-dimensional coordinate
- * e.g. shape=[2,3,4], idx in [0..23]
- * => coord=[b,c,d]
+/**
+ * @brief Converts a linear index into a multi-dimensional index.
+ *
+ * @param idx The linear index.
+ * @param shape The shape of the tensor.
+ * @return std::vector<size_t> The corresponding multi-dimensional index.
  */
 std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape) {
     std::vector<size_t> coords(shape.size());
@@ -123,10 +164,16 @@ std::vector<size_t> unravel_index(size_t idx, const std::vector<size_t>& shape) 
 }
 
 
-/*
- * helper function to compute the gradient reduction for broadcasting
- * Given the gradient of `result`, we adjust it to match the original shape
- * of the input tensors by summing over the broadcasted dimensions.
+/**
+ * @brief Reduces a gradient tensor to match the original shape after broadcasting.
+ *
+ * This function accumulates gradients along broadcasted dimensions to maintain
+ * correct gradient propagation.
+ *
+ * @param grad The gradient tensor after the operation.
+ * @param grad_shape The shape of the gradient tensor.
+ * @param original_shape The original shape of the tensor before broadcasting.
+ * @return std::vector<float> The reduced gradient tensor.
  */
 std::vector<float> reduce_grad(const std::vector<float>& grad, 
                                const std::vector<size_t>& grad_shape, 
@@ -142,8 +189,8 @@ std::vector<float> reduce_grad(const std::vector<float>& grad,
     return reduced_grad;
 }
 
-/* 
- * helper function to print tensor shape 
+/**
+ * @brief Prints the shape of a tensor to standard output.
  */
 void printShape(const std::vector<size_t>& shape) {
     for (size_t s : shape) {
@@ -152,8 +199,11 @@ void printShape(const std::vector<size_t>& shape) {
     std::cout << std::endl;
 }
 
-/*
- * helper function to print tensor shapes
+/**
+ * @brief Prints two tensor shapes side by side for debugging.
+ *
+ * @param shape1 The shape of the first tensor.
+ * @param shape2 The shape of the second tensor.
  */
 void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& shape2) {
     std::cout << "this->shape ";
@@ -167,8 +217,10 @@ void printShapes(const std::vector<size_t>& shape1, const std::vector<size_t>& s
     std::cout << std::endl;
 }
 
-/*
- * helper function returning the shape of a tensor 
+/**
+ * @brief Returns the shape of the tensor.
+ *
+ * @return std::vector<size_t> The shape vector of the tensor.
  */
 std::vector<size_t> Tensor::shape() const {
     if(this->ptr == NULL){
@@ -177,8 +229,10 @@ std::vector<size_t> Tensor::shape() const {
     return ptr->shape;
 }
 
-/*
- * helper function returning the data of a tensor 
+/**
+ * @brief Returns the raw data of the tensor as a vector.
+ *
+ * @return std::vector<float> The data of the tensor.
  */
 std::vector<float> Tensor::data() const {
     if(this->ptr == NULL){
@@ -187,8 +241,11 @@ std::vector<float> Tensor::data() const {
     return ptr->data;
 };
 
-/*
- * helper function returning the gradient tensor
+/**
+ * @brief Retrieves the gradient of the tensor.
+ *
+ * @return Tensor A tensor containing the gradient.
+ * @throws std::runtime_error If the tensor has no gradient.
  */
 Tensor Tensor::grad() const{
     std::thread::id tid = std::this_thread::get_id();
@@ -198,14 +255,19 @@ Tensor Tensor::grad() const{
     return Tensor(ptr->thread_gradients[tid]);
 }
 
-/* 
- * disable gradient computation
+/**
+ * @brief Disables gradient computation for the tensor.
+ *
+ * This is typically used in inference mode to improve efficiency.
  */
 void Tensor::eval() {
     ptr->requires_grad = false;
 }
-/*
- * enable gradient computation
+
+/**
+ * @brief Enables gradient computation for the tensor.
+ *
+ * This is required when training a model.
  */
 void Tensor::train() {
     ptr->requires_grad = true;

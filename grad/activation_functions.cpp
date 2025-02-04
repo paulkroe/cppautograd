@@ -1,5 +1,31 @@
 #include "cppgrad.h"
-Tensor Tensor::relu() const{
+/**
+ * @brief Applies the ReLU (Rectified Linear Unit) activation function element-wise.
+ *
+ * This function computes the ReLU activation for each element in the tensor,
+ * defined as:
+ * \f[
+ * f(x) = \max(0, x)
+ * \f]
+ *
+ * If the input tensor has `requires_grad` set to `true`, this function:
+ * - Constructs a computation graph entry for automatic differentiation.
+ * - Stores a backward function that computes the derivative of ReLU, which is
+ *   `1` for positive inputs and `0` for non-positive inputs.
+ * - Ensures per-thread gradient tracking for multi-threaded execution.
+ *
+ * @return Tensor The result tensor with the same shape as the input tensor.
+ * 
+ * @note If `requires_grad` is `true`, this function registers the tensor in the computation graph
+ *       and initializes thread-local gradients.
+ * 
+ * @example Usage:
+ * @code
+ * Tensor x({-2.0f, 3.0f, -1.0f, 4.0f}, {2, 2}, true);
+ * Tensor y = x.relu();
+ * @endcode
+ */
+Tensor Tensor::relu() const {
     
     auto this_shape = this->ptr->shape;
     auto this_data = this->ptr->data;
@@ -41,6 +67,7 @@ Tensor Tensor::relu() const{
             }
         }
 
+        /* construct backward function */
         result.ptr->backward_fn = [this_ptr = this->ptr, result_ptr = result.ptr]() {
 
             std::thread::id tid = std::this_thread::get_id();

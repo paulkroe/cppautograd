@@ -1,4 +1,5 @@
 /.vscode
 /build
 /cmake/build
-/demo/data
+demo/data/mnist_test.csv
+demo/data/mnist_train.csv

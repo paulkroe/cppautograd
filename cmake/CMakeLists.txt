@@ -66,11 +66,6 @@ add_executable(digit_classification ${PROJECT_ROOT_DIR}/demo/digit_classificatio
 target_link_libraries(digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
 target_include_directories(digit_classification PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/demo)
 
-# Add the test executable for multi-threaded digit classification
-add_executable(multithreadding_digit_classification ${PROJECT_ROOT_DIR}/demo/multithreadding_digit_classification.cpp)
-target_link_libraries(multithreadding_digit_classification PRIVATE cppgrad "${TORCH_LIBRARIES}")
-target_include_directories(multithreadding_digit_classification PRIVATE ${TORCH_INCLUDE_DIRS} ${PROJECT_ROOT_DIR}/demo)
-
 # Add the tutorial executable
 add_executable(tutorial ${PROJECT_ROOT_DIR}/demo/tutorial.cpp)
 target_link_libraries(tutorial PRIVATE cppgrad "${TORCH_LIBRARIES}")

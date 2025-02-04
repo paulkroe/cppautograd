@@ -363,47 +363,5 @@ int main(int argc, char **argv) {
 
     /* Set random seed */
     set_seed(42);
-// {
-//     Tensor x = Tensor({0,0,0}, {3}, true);
-//     Tensor exp_tensor = x.exp();
-//     Tensor sum_exp = exp_tensor.sum() + 1e-6;
-//     Tensor out = exp_tensor / sum_exp;
-//     Tensor out_sum = out.sum();
-//     out_sum.backward(); 
-
-//     // Print gradients
-//     std::cout << "Gradient x " << x.id << ": " << x.grad() << std::endl;
-//     std::cout << "Gradient exp_tensor "<< exp_tensor.id << ": " << exp_tensor.grad() << std::endl;
-//     std::cout << "Gradient sum_exp "<< sum_exp.id <<": " << sum_exp.grad() << std::endl;
-//     std::cout << "Gradient out " << out.id << ": " << out.grad() << std::endl;
-
-// }
-// std::cout << "<---------------------------------->" << std::endl;
-// {
-//     auto x = torch::tensor({0.0, 0.0, 0.0}, torch::requires_grad(true));
-
-//     // Compute softmax-related operations
-//     auto exp_tensor = x.exp();
-//     exp_tensor.retain_grad(); // Retain gradient for printing
-
-//     auto sum_exp = exp_tensor.sum() + 1e-6;
-
-//     // Reshape sum_exp for broadcasting
-//     sum_exp = sum_exp.view({1}); 
-//     sum_exp.retain_grad(); // Retain gradient for printing
-
-//     auto out = exp_tensor / sum_exp;
-//     out.retain_grad(); // Retain gradient for printing
-
-//     auto out_sum = out.sum();
-//     out_sum.backward(); 
-
-//     std::cout << "Gradient x: " << x.grad() << std::endl;
-//     std::cout << "Gradient exp_tensor: " << exp_tensor.grad() << std::endl;
-//     std::cout << "Gradient sum_exp: " << sum_exp.grad() << std::endl;
-//     std::cout << "Gradient out: " << out.grad() << std::endl;
-// }
-
-//     return 0;
     return RUN_ALL_TESTS();
 }
